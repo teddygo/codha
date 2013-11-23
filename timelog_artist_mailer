@@ -9,7 +9,7 @@ from shotgun_api3 import Shotgun	# check if shotgun module present on system
 from datetime import date, datetime , timedelta
 sys.path.append(r'C:\Python27') # check if python exists on system
 
-modOffice = imp.load_source('office365','//10.10.35.206/shotgunpro/maint/office365.py')
+modOffice = imp.load_source('office365','//xx.xx.xx.xxx/shotgunpro/maint/office365.py')
 
 class timeLog(object):
 	def __init__(self):
@@ -144,7 +144,7 @@ def main():
 
 	tl = timeLog()
 	try:														# login to shotgun
-		tl.sg = Shotgun('https://futureworks.shotgunstudio.com' , 't_script', 'eb703a27885e0bf726651b77cb587bc9d831d03a')
+		tl.sg = Shotgun('https://futureworks.shotgunstudio.com' , 't_script', 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
 	except smtplib.SMTPAuthenticationError:
 		print 'SMTPAuthenticationError'
 
