@@ -1,0 +1,197 @@
+#!/usr/bin/env python
+#schtasks /Create /SC daily /st 07:00 /TN TimeLogShotGun /TR "C:\Python27\python.exe D:\shotgunpro\class_timeLog_beta_v02.py" /F /V1
+#
+#
+#
+#
+# conditions :
+# if time log is 0, then add line "mail sent to "xxxxxx.x@futureworks.in" for "xxxxxxxxxx" shot
+# if time log is 0, then check assignedto, shotcode, assigned task
+#
+# if email id is absent then add line to producer, for ... shot email id is not there
+# 3 conditions for testing : project_id should be a test project, filters should have hold instead for hold, mail to go to tester
+#
+# changes : 01,nishith.singhai@futureworks.in,not needed
+# when making changes always update \\10.10.35.206\shotgunpro\t9_timeLogFilter_alpha_v01.py
+
+# ---------------------------------------------------------------------------------------------
+# Imports
+# ---------------------------------------------------------------------------------------------
+
+import tempfile
+import smtplib
+import sys,os
+import time
+import datetime
+import imp
+
+from shotgun_api3 import Shotgun	# check if shotgun module present on system
+from datetime import date, datetime , timedelta
+sys.path.append(r'C:\Python27') # check if python exists on system
+
+modOffice = imp.load_source('office365','//10.10.35.206/shotgunpro/maint/office365.py')
+# alternately use win_unc
+#reload(modOffice)
+
+class timeLog(object):
+	def __init__(self):
+
+		self.attachedfiles = []
+
+		self.OUTPUT_FILE = tempfile.gettempdir() + "\\" + "shotgunlog.txt"
+
+		self.SUBJECT_01 = "ShotgunAdmin : please fill in time log"
+		self.SUBJECT_02 = "shotgunAdmin - list of artists missed filling time log"
+
+		self.TEXT_02 = "Artist who have not filled time log for yesterday.\nclick to download file"
+		self.mailcounter = 0
+
+#
+#---------------------------------------------------------------------------------------------
+#
+#	define previousTimeLog()
+#	for a given current date, look in task for artist who have not filled in duration and send them a mail
+#
+#---------------------------------------------------------------------------------------------
+#
+	def previousTimeLog(self, numberOfDays, textForNumberOfDays, conn):
+
+		TEXT = ""
+		TEXT_0 = "Hi "
+		TEXT_1 = "\n\n\n\tJust checking that your time log for date : "
+		TEXT_2 = " for "
+		TEXT_3 = " is not filled. \nFill it at the earliest to help facilitate production.\n\n\nThank you\nShotgunSupport"
+		TEXT_4 = "Shot not specified "
+		TEXT_5 = "Artist email field blank"
+		attachLine = ''
+		HUMANMAILID = []								# reset
+		HumanName = ''
+	#
+	# -------------------------------------------------------------------------------------
+	#
+
+
+		date_filter = datetime.strptime('Sep 1 2013  12:00PM', '%b %d %Y %I:%M%p')			# search for records not before 1 sept 2013
+		upperLimitFilter = (date_filter).strftime('%Y-%m-%d')
+		
+		
+		dayInDate = (date.today() - timedelta(numberOfDays)).strftime('%Y-%m-%d')
+		print 'dayInDate ',dayInDate
+		tempString = "\n\nFollowing names are for "+textForNumberOfDays+"( date : " + dayInDate + ")\n"
+		f.write(tempString)
+		f.write("=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n")
+	
+		filters = [
+			["start_date","between", dayInDate, upperLimitFilter],
+			["start_date","is_not", None],
+			["task_assignees","is_not", None],{
+			"filter_operator": "any",
+			"filters": [
+			["sg_status_list", "is", "ip"],
+			["sg_status_list", "is", "corr"]]
+			}, ["project.Project.sg_status", "is", "active"],
+			["time_logs_sum","is",0]]		
+		fields = ["task_assignees", "project", "entity.Shot.code"]
+
+	#
+	# -------------------------------------------------------------------------------------
+	#
+			
+		for eventTimeLog in sg.find('Task', filters, fields):
+	
+			if (eventTimeLog['task_assignees'] == []):
+				attachLine = "data is missing for %s\n" % eventTimeLog["entity.Shot.code"]
+			else:
+				HumanName = str(eventTimeLog['task_assignees'][0]['name'])
+	
+				HUMANMAILID.append(sg.find_one('HumanUser',filters=[['name','is',HumanName]],\
+				fields=['email'])['email'])
+	
+				if (eventTimeLog["entity.Shot.code"] != None) and (HUMANMAILID != ['']):							# nested if shot code ok and if email ok then
+					TEXT = TEXT_0 + HUMANMAILID[0].split("@")[0].split(".")[0].title() + TEXT_1 \
+					+ dayInDate + TEXT_2 + eventTimeLog["entity.Shot.code"] + TEXT_3
+					attachLine = "mail sent to \"%s\" for \"%s\"\n" % (HUMANMAILID[0],\
+					eventTimeLog["entity.Shot.code"])
+				elif (eventTimeLog["entity.Shot.code"] != None) and (HUMANMAILID == ['']):							# nested if shot code ok and if email ok then
+						TEXT = ""
+						attachLine = "\"%s\" for \"%s\"\n" % (TEXT_5,eventTimeLog["entity.Shot.code"])
+				elif (eventTimeLog["entity.Shot.code"] == None) and (HUMANMAILID == ['']):							# nested if shot code ok and if email ok then
+						TEXT = ""
+						attachLine = "\"%s\" and \"%s\"\n" % (TEXT_4, TEXT_5)
+				else:
+					TEXT = TEXT_0 + HUMANMAILID[0].split("@")[0].split(".")[0].title() + TEXT_1 + \
+					dayInDate + TEXT_2 + TEXT_4 + TEXT_3
+					attachLine = "mail went to \"%s\" for \"%s\"\n" % (HUMANMAILID[0],TEXT_4)
+	#
+	# -------------------------------------------------------------------------------------
+	#
+				if (off.is_connected(conn) == True):
+					self.attachedfiles = []
+
+					if (numberOfDays == 2):
+						try:
+							off.sendAttachment(off.MAILUSER, HUMANMAILID, off.SUPERGROUPID, \
+							self.SUBJECT_01, TEXT, self.attachedfiles, conn)
+							#off.sendAttachment(off.MAILUSER, off.SHOTGUNADMIN, off.SHOTGUNADMIN, self.SUBJECT_01, TEXT, self.attachedfiles, conn)
+							print "mail sent to \"%s\" \n" % (HUMANMAILID + off.SUPERGROUPID)
+						except Exception, error:
+							print "Unable to send e-mail: '%s'." % str(error)
+					elif (numberOfDays == 1):
+						sc = ['']										# blank cc
+						try:
+							off.sendAttachment(off.MAILUSER, HUMANMAILID, sc, self.SUBJECT_01, \
+							TEXT, self.attachedfiles, conn)
+							#off.sendAttachment(off.MAILUSER, off.SHOTGUNADMIN, sc, self.SUBJECT_01, TEXT, self.attachedfiles, conn)
+							print "mail sent to \"%s\" \n" % (HUMANMAILID)
+						except Exception, error:
+							print "Unable to send e-mail: '%s'." % str(error)
+					self.mailcounter = self.mailcounter  + 1
+					if (self.mailcounter == 1):
+						print "waiting 80 seconds..."
+						time.sleep(120)
+						self.mailcounter = 0
+							
+				else:
+					print 'no connection with mail server. Exiting ....'
+					return 1
+			HUMANMAILID[:] = []						# reset HUMANMAILID
+			HumanName = ''							# reset HumanName
+
+			f.write('%s\n' % (attachLine))
+#
+# ---------------------------------------------------------------------------------------------
+# call previousTimeLog
+# ---------------------------------------------------------------------------------------------
+off = modOffice.office365()
+conn = off.create_conn()
+
+tl = timeLog()
+try:														# login to shotgun
+	sg = Shotgun('https://futureworks.shotgunstudio.com' , 't_script', 'eb703a27885e0bf726651b77cb587bc9d831d03a')
+except smtplib.SMTPAuthenticationError:
+	print 'SMTPAuthenticationError'
+
+f = open(tl.OUTPUT_FILE ,'w')
+if (off.is_connected(conn) == True):
+
+	f.write("\n\n\t\t-: ShotgunAdmin timeLog report :-\n\n\n" )
+
+	if (tl.previousTimeLog(2, "day before yesterday", conn)	== 1) or (tl.previousTimeLog(1, "yesterday", conn) == 1):
+		os._exit(1)
+
+	f.write("\n\n\n\t\t\t-: end of report :-")
+f.close()
+
+tl.attachedfiles.append(tl.OUTPUT_FILE)
+try:
+	off.sendAttachment(off.MAILUSER, off.PRODGROUPID ,off.SHOTGUNADMIN ,tl.SUBJECT_02 ,tl.TEXT_02 ,tl.attachedfiles ,conn )
+	pass
+except Exception, error:
+	print "Unable to send e-mail: '%s'." % str(error)
+
+finally :
+	os.remove(tl.OUTPUT_FILE)		# delete temporary file
+
+off.closeConnect(conn)
+print 'Mail Sent. Connection to mail server closed. Task completed.'
+# ---------------------------------------------------------------------------------------------
