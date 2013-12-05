@@ -20,7 +20,7 @@ from email import Encoders
 
 #=========================================================================================
 
-modOffice = imp.load_source('office365','//10.10.35.206/shotgunpro/maint/office365.py')
+modOffice = imp.load_source('office365','//xx.xx.xx.xxx/shotgunpro/maint/office365.py')
 #reload(modOffice)
 off = modOffice.office365()
 
@@ -207,7 +207,7 @@ parser.add_argument("emailid", nargs='?',
 options, unk = parser.parse_known_args()
 
 
-sg = Shotgun('https://futureworks.shotgunstudio.com' , 't_script', 'eb703a27885e0bf726651b77cb587bc9d831d03a')
+sg = Shotgun('https://xxxxxxxxxxxxxx.shotgunstudio.com' , 't_script', 'eb703jhgjjj686f8660d651b77cb587bc9d831d03a')
 
 printReport()
 
