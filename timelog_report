@@ -1,13 +1,27 @@
 from shotgun_api3 import Shotgun
 
+import os
+import imp
 import xlwt
 import types
+
+import shutil
+import smtplib
+import tempfile
 import argparse
+
+from email.MIMEMultipart import MIMEMultipart
+from email.MIMEBase import MIMEBase
+from email.Utils import COMMASPACE, formatdate
+from email.MIMEText import MIMEText
+from email import Encoders
+
+
 
 #=========================================================================================
 
-modOffice = imp.load_source('office365','//xx.xx.xx.xxx/shotgunpro/office365.py')
-reload(modOffice)
+modOffice = imp.load_source('office365','//10.10.35.206/shotgunpro/maint/office365.py')
+#reload(modOffice)
 off = modOffice.office365()
 
 #=========================================================================================
@@ -78,11 +92,10 @@ sh = book.add_sheet("TimeGoal", cell_overwrite_ok=True)
 
 def printReport():
 	global totalcount
+	global row,column, cellData
 	import datetime
 	currentYear = datetime.date.today().strftime("%Y")
-	print 'currentYear ',type(currentYear)
-	print 'options.day ',type(options.day)
-	print 'options.month',type(options.month)
+
 	if isinstance(options.day,types.NoneType):
 		argdate1 = (options.month).title() + ' 1 ' + currentYear
 		argdate2 = (options.month).title() + ' 31 ' + currentYear
@@ -98,8 +111,6 @@ def printReport():
 	date_filter = datetime.strptime(argdate2, '%b %d %Y')			# search for records not before 1 sept 2013
 	lastday = (date_filter).strftime('%Y-%m-%d')
 	
-	print 'firstday ',firstday
-	print 'lastday ',lastday	
 	
 	filters_01 = [["sg_location","is",options.location],[ "groups", "is", { "type": "Group", "id": 5 } ],["sg_status_list","is","act"]]          # group id 5 is for mumbai
 	fields_01 = ["id","name"]
@@ -126,7 +137,7 @@ def printReport():
 	for alls in sg.find('HumanUser',filters_01,fields_01):
 		artistId = alls['id']
 		aname = alls['name']
-		print aname,'\n'
+
 		sh.write(row, 0, aname,ARTIST_CELL)
 		filters_02 = [["date","between", firstday, lastday], [ "user", "is", { "type": "HumanUser", "id": artistId } ]]
 		for ulls in sg.find('TimeLog',filters_02,fields_02):
@@ -181,57 +192,54 @@ def printReport():
 # export to csv
 # replace mumbai with argv1
 # replace date singleday with argv2
-try:
 	
-	parser = argparse.ArgumentParser(description="A program to generate report from any workstation")
-	parser.add_argument("location", choices = fwxlocation ,
-	                    help='Location of which report is needed. Allowed values are  '+', '.join(fwxlocation),metavar='')
-	parser.add_argument("month",
-	                    help='Which month would you like report for. Allowed values are '+', '.join(monthsInAYear), metavar='', choices = monthsInAYear)
-	parser.add_argument("day", nargs='?',
-	                    help='Which day would you like report for. Allowed values are '+', '.join(dates), metavar='', choices = dates)
-	parser.add_argument("emailid", nargs='?',
-	                    help='Who should read this report. Allowed values are '+', '.join(dates), metavar='', choices = emailList)
-	
-	#args = parser.parse_args()
-	options, unk = parser.parse_known_args()
-	
-	print 'options.location ',options.location
-	print 'options.emailid ',options.emailid
-	
-	sg = Shotgun('https://futureworks.shotgunstudio.com' , 't_script', 'eb703a27885e0bf726651b77cb587bc9d831d03a')
-	
-	printReport()
+parser = argparse.ArgumentParser(description="A program to generate report from any workstation")
+parser.add_argument("location", choices = fwxlocation ,
+                    help='Location of which report is needed. Allowed values are  '+', '.join(fwxlocation),metavar='')
+parser.add_argument("month",
+                    help='Which month would you like report for. Allowed values are '+', '.join(monthsInAYear), metavar='', choices = monthsInAYear)
+parser.add_argument("day", nargs='?',
+                    help='Which day would you like report for. Allowed values are '+', '.join(dates), metavar='', choices = dates)
+parser.add_argument("emailid", nargs='?',
+                    help='Who should read this report. Allowed values are '+', '.join(dates), metavar='', choices = emailList, default = "nishith.singhai@futureworks.in")
 
-	tmp_dir = tempfile.mkdtemp()  # create dir
-	OUTPUT_FILE = os.path.join(tmp_dir,"WeeklyReport.xls")
-	book.save(OUTPUT_FILE)
-	mailConn = off.create_conn()
-	isConn = off.is_connected(mailConn)
-	if (isConn == True):
-		listmsg = MIMEMultipart()
-		listmsg['From'] = off.MAILUSER
-		listmsg['To'] = ",".join(off.PRODGROUPID + off.SHOTGUNADMIN)
-		#listmsg['Subject'] = off.subject_list
-		listmsg['Subject'] = "weekly report"
-		#listmsg.attach(MIMEText(off.text_list_report))
-		listmsg.attach(MIMEText("click to download file"))
-		part = MIMEBase('application', "octet-stream")
-		part.set_payload( open(OUTPUT_FILE,"rb").read() )
-		Encoders.encode_base64(part)
-		part.add_header('Content-Disposition', 'attachment; filename="%s"' % os.path.basename(OUTPUT_FILE))
-		listmsg.attach(part)
-		try:
-			mailConn.sendmail("", "", listmsg.as_string())
-			print "file sent to \"%s\" \n" % (off.MAILUSER + off.SHOTGUNADMIN[0])
-		except smtplib.SMTPRecipientsRefused as e:
-			mailConn.rset()
-		mailConn.close()							# if everything went well then close mail server
+#args = parser.parse_args()
+options, unk = parser.parse_known_args()
 
-finally:
+
+sg = Shotgun('https://futureworks.shotgunstudio.com' , 't_script', 'eb703a27885e0bf726651b77cb587bc9d831d03a')
+
+printReport()
+
+tmp_dir = tempfile.mkdtemp()  # create dir
+OUTPUT_FILE = os.path.join(tmp_dir,"WeeklyReport.xls")
+book.save(OUTPUT_FILE)
+mailConn = off.create_conn()
+isConn = off.is_connected(mailConn)
+if (isConn == True):
+	listmsg = MIMEMultipart()
+	listmsg['From'] = off.MAILUSER
+	listmsg['To'] = ",".join(off.PRODGROUPID + off.SHOTGUNADMIN)
+	#listmsg['Subject'] = off.subject_list
+	listmsg['Subject'] = "test timelog report from python command line"
+	#listmsg.attach(MIMEText(off.text_list_report))
+	listmsg.attach(MIMEText("click to download file. Please do not reply to this mail. Use shotgunsupport@futureworks.in instead"))
+	part = MIMEBase('application', "octet-stream")
+	part.set_payload( open(OUTPUT_FILE,"rb").read() )
+	Encoders.encode_base64(part)
+	part.add_header('Content-Disposition', 'attachment; filename="%s"' % os.path.basename(OUTPUT_FILE))
+	listmsg.attach(part)
 	try:
-		shutil.rmtree(tmp_dir)	# delete directory
-	except OSError as exc:
-		if exc.errno != 2:	# code 2 - no such file or directory
-			raise  # re-raise exception
+		mailConn.sendmail(off.MAILUSER, off.SHOTGUNADMIN, listmsg.as_string())
+		print "file sent to \"%s\" \n" % (off.MAILUSER + off.SHOTGUNADMIN[0])
+	except smtplib.SMTPRecipientsRefused as e:
+		mailConn.rset()
+	mailConn.close()							# if everything went well then close mail server
+try:
+	shutil.rmtree(tmp_dir)	# delete directory
+except OSError as exc:
+	if exc.errno != 2:	# code 2 - no such file or directory
+		raise  # re-raise exception
+
+
 
