@@ -24,13 +24,13 @@ monthrange(2013,10)[1]
 
 #=========================================================================================
 # add this location to PYTHONPATH variable
-sys.path.append("//10.10.35.205/shotgunpro/regular")
+sys.path.append("//00.00.00.000/shotgunpro/regular")
 
-modOffice = imp.load_source('office365','//10.10.35.205/shotgunpro/regular/office365.py')
+modOffice = imp.load_source('office365','//00.00.00.000/shotgunpro/regular/office365.py')
 reload(modOffice)
 off = modOffice.office365()
 
-modFunc = imp.load_source('getModules','//10.10.35.205/shotgunpro/regular/getModules.py')
+modFunc = imp.load_source('getModules','//00.00.00.000/shotgunpro/regular/getModules.py')
 reload(modFunc)
 
 #=========================================================================================
@@ -262,7 +262,7 @@ parser.add_argument("-emailid2", nargs='?',
 #args = parser.parse_args()
 options, unk = parser.parse_known_args()
 
-sg = Shotgun('https://futureworks.shotgunstudio.com' , 't_script', 'eb703a27885e0bf726651b77cb587bc9d831d03a')
+sg = Shotgun('https://jhkjhkhs.jhkjhkkkdio.com' , 'khkhcript', 'eb703a2kjhgkjhkjh7cb587bc9d831d03a')
 
 printReport()
 
