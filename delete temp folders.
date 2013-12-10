@@ -1,0 +1,10 @@
+@echo off
+cd /d %temp%
+for /r %%a in (*.*) do (
+del /f /q %~a ) > nul
+cd /d %userprofile%\Local settings\Temporary Internet Files
+for /r %%b in (*.*) do (
+del /f /q %~b ) > nul
+
+
+cd /d %userprofile%\AppData\Local\Temp
