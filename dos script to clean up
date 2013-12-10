@@ -1,0 +1,252 @@
+@ECHO OFF
+:: Only Tested on Windows 2000/XP/Server2003/Vista
+
+:: Username is the User's Profile Folder
+set user=%USERNAME%'s
+if %USERNAME:~-1% EQU s set user=%USERNAME%'
+if %USERNAME:~-1% EQU S set user=%USERNAME%'
+TITLE Cleanup of %user% Temp Files
+
+if not exist "%SYSTEMDRIVE%\IT\CleanUp.bat" goto COPY
+%SYSTEMDRIVE%
+cd\
+
+:START
+set a=X
+set b=X
+set c=X
+set d=X
+set e=X
+set f=X
+set g=X
+set h=X
+set SDATE=%date%
+set STIME=%time%
+
+echo %USERNAME% >> %SYSTEMDRIVE%\IT\CleanUp.log
+echo Start: %SDATE% %STIME% >> %SYSTEMDRIVE%\IT\CleanUp.log
+
+:AAA
+if not exist "%userprofile%\cookies" goto BBB
+title Deleting %user% Cookies. . .
+for /f %%a in ('dir "%userprofile%\cookies" /b/s /a-d ^| find /v /c "::" ') do (
+echo Cookies: %%a >> %SYSTEMDRIVE%\IT\CleanUp.log
+set a=%%a
+)
+cd "%userprofile%\Cookies"
+del *.* /F /S /Q /A: R /A: H /A: A
+cls
+
+:BBB
+if not exist "%userprofile%\Local Settings\History" goto CCC
+title Deleting %user% Internet History. . .
+for /f %%b in ('dir "%userprofile%\Local Settings\History" /b/s /a-d ^| find /v /c "::" ') do (
+echo Internet History: %%b >> %SYSTEMDRIVE%\IT\CleanUp.log
+set b=%%b
+)
+cd "%userprofile%\Local Settings\History"
+del *.* /F /S /Q /A: R /A: H /A: A
+rmdir /s /q "%userprofile%\Local Settings\History\History"
+cls
+
+:CCC
+if not exist "%userprofile%\Local Settings\Temp" goto DDD
+title Deleting %user% Temp Files. . .
+for /f %%c in ('dir "%userprofile%\Local Settings\Temp" /b/s /a-d ^| find /v /c "::" ') do (
+echo Local Temp Files: %%c >> %SYSTEMDRIVE%\IT\CleanUp.log
+set c=%%c
+)
+cd "%userprofile%\Local Settings\Temp"
+del *.* /F /S /Q /A: R /A: H /A: A
+rmdir /s /q "%userprofile%\Local Settings\Temp"
+cls
+
+:DDD
+if not exist "%userprofile%\Local Settings\Temporary Internet Files" goto EEE
+title Deleting %user% Temporary Internet Files. . .
+for /f %%d in ('dir "%userprofile%\Local Settings\Temporary Internet Files" /b/s /a-d ^| find /v /c "::" ') do (
+echo Local Users Temporary Internet Files: %%d >> %SYSTEMDRIVE%\IT\CleanUp.log
+set d=%%d
+)
+cd "%userprofile%\Local Settings\Temporary Internet Files"
+del *.* /F /S /Q /A: R /A: H /A: A
+rmdir /s /q "%userprofile%\Local Settings\Temporary Internet Files"
+cls
+
+:EEE
+if not exist "%Systemroot%\Temp" goto FFF
+title Deleting Windows Temp Files. . .
+for /f %%e in ('dir "%Systemroot%\Temp" /b/s /a-d ^| find /v /c "::" ') do (
+echo Windows Temp Files: %%e >> %SYSTEMDRIVE%\IT\CleanUp.log
+set e=%%e
+)
+cd "%Systemroot%\Temp"
+del *.* /F /S /Q /A: R /A: H /A: A
+rmdir /s /q "%Systemroot%\Temp"
+cls
+
+:FFF
+if not exist "%userprofile%\AppData\Local\Microsoft\Windows\History" goto GGG
+title Deleting %user% Internet History. . .
+for /f %%f in ('dir "%userprofile%\AppData\Local\Microsoft\Windows\History" /b/s /a-d ^| find /v /c "::" ') do (
+echo Internet History: %%f >> %SYSTEMDRIVE%\IT\CleanUp.log
+set f=%%f
+)
+cd "%userprofile%\AppData\Local\Microsoft\Windows\History"
+del *.* /F /S /Q /A: R /A: H /A: A
+rmdir /s /q "%userprofile%\AppData\Local\Microsoft\Windows\History"
+cls
+
+:GGG
+if not exist "%userprofile%\AppData\Local\Microsoft\Windows\Temporary Internet Files" goto HHH
+title Deleting %user% Temporary Internet Files. . .
+for /f %%g in ('dir "%userprofile%\AppData\Local\Microsoft\Windows\Temporary Internet Files" /b/s /a-d ^| find /v /c "::" ') do (
+echo Temporary Internet Files: %%g >> %SYSTEMDRIVE%\IT\CleanUp.log
+set g=%%g
+)
+cd "%userprofile%\AppData\Local\Microsoft\Windows\Temporary Internet Files"
+del *.* /F /S /Q /A: R /A: H /A: A
+rmdir /s /q "%userprofile%\AppData\Local\Microsoft\Windows\Temporary Internet Files"
+cls
+
+:HHH
+if not exist "%userprofile%\AppData\Local\Temp" goto III
+title Deleting %user% Temp. . .
+for /f %%h in ('dir "%userprofile%\AppData\Local\Temp" /b/s /a-d ^| find /v /c "::" ') do (
+echo Local Temp Files: %%h >> %SYSTEMDRIVE%\IT\CleanUp.log
+set h=%%h
+)
+cd "%userprofile%\AppData\Local\Temp"
+del *.* /F /S /Q /A: R /A: H /A: A
+rmdir /s /q "%userprofile%\AppData\Local\Temp"
+cls
+
+:III
+:: Test for Windows 2000
+for /F "tokens=3*" %%v in ('ver') do set version=%%v
+if %version%==2000 goto JJJ
+:: Verify Internet Explorer 7
+set qry=reg query "HKEY_LOCAL_MACHINE\Software\Microsoft\Internet Explorer" /v Version
+set fnd=findstr /I /L /C:"REG_SZ"
+for /f "Tokens=2*" %%u in ('%qry%^|%fnd%') do (
+SET Version=%%v
+)
+if %Version% LSS 7 goto JJJ
+title Deleting Internet Explorer 7 Temp Files
+::Internet Explorer 7 
+::Temporary Internet Files
+RunDll32.exe InetCpl.cpl,ClearMyTracksByProcess 8
+::Cookies
+RunDll32.exe InetCpl.cpl,ClearMyTracksByProcess 2
+::History
+RunDll32.exe InetCpl.cpl,ClearMyTracksByProcess 1
+::Form Data
+rem RunDll32.exe InetCpl.cpl,ClearMyTracksByProcess 16
+::Passwords
+rem RunDll32.exe InetCpl.cpl,ClearMyTracksByProcess 32
+::Delete All
+rem RunDll32.exe InetCpl.cpl,ClearMyTracksByProcess 255
+::Delete All - Also delete files and settings stored by add-ons
+rem RunDll32.exe InetCpl.cpl,ClearMyTracksByProcess 4351
+
+:JJJ
+
+set FTIME=%time%
+set FDATE=%date%
+
+echo Finished: %FDATE% %FTIME% >> %SYSTEMDRIVE%\IT\CleanUp.log
+
+:: time conversion
+set shh=%STIME:~0,2%
+set smm=%STIME:~3,2%
+set sss=%STIME:~6,2%
+set sms=%STIME:~9,2%
+if %shh% LSS 10 set shh=%shh:~1,1%
+if %smm% LSS 10 set smm=%smm:~1,1%
+if %sss% LSS 10 set sss=%sss:~1,1%
+if %sms% LSS 10 set sms=%sms:~1,1%
+SET /a STIME100S=%shh%*360000+%smm%*6000+%sss%*100+%sms%
+set fhh=%FTIME:~0,2%
+set fmm=%FTIME:~3,2%
+set fss=%FTIME:~6,2%
+set fms=%FTIME:~9,2%
+if %fhh% LSS 10 set fhh=%fhh:~1,1%
+if %fmm% LSS 10 set fmm=%fmm:~1,1%
+if %fss% LSS 10 set fss=%fss:~1,1%
+if %fms% LSS 10 set fms=%fms:~1,1%
+SET /a FTIME100S=%fhh%*360000+%fmm%*6000+%fss%*100+%fms%
+:: START midnight rollover. If so, add 1 day=8640000 1/100ths secs
+IF %FTIME100S% LSS %STIME100S% SET /a FTIME100S+=8640000
+SET /a TookTime=%FTIME100S%-%STIME100S%
+
+if %TookTime% LEQ 99 goto MILLI
+if %TookTime:~0,-2% GEQ 3600 goto HRS
+if %TookTime:~0,-2% GEQ 60 goto MINS
+if %TookTime:~0,-2% GEQ 1 goto SECS
+
+:HRS
+SET /A HRS=%TookTime:~0,-2%/3600
+SET /A MINS=(%TookTime:~0,-2%-%HRS%*3600)/60
+SET /A SECS=%TookTime:~0,-2%-(%HRS%*3600+%MINS%*60)
+set ELAPSED=%HRS% Hours %MINS% Minutes %SECS%.%TookTime:~-2% Seconds
+ECHO Elapsed: %ELAPSED% >> %SYSTEMDRIVE%\IT\CleanUp.log
+goto RESULTS
+
+:MINS
+SET /A MINS=%TookTime:~0,-2%/60
+SET /A SECS=%TookTime:~0,-2%-%MINS%*60
+set ELAPSED=%MINS% Minutes %SECS%.%TookTime:~-2% Seconds
+ECHO Elapsed: %ELAPSED% >> %SYSTEMDRIVE%\IT\CleanUp.log
+goto RESULTS
+
+:SECS
+set ELAPSED=%TookTime:~0,-2%.%TookTime:~-2% Seconds
+ECHO Elapsed: %ELAPSED% >> %SYSTEMDRIVE%\IT\CleanUp.log
+goto RESULTS
+
+:MILLI
+set ELAPSED=.%TookTime:~-2% Seconds
+ECHO Elapsed: %ELAPSED% >> %SYSTEMDRIVE%\IT\CleanUp.log
+goto RESULTS
+
+:RESULTS
+title Finished Cleanup of %user% Temp Files
+set /A total="%a%+%b%+%c%+%d%+%e%+%f%+%g%+%h%"
+ECHO Total: %total% >> %SYSTEMDRIVE%\IT\CleanUp.log
+echo. >> %SYSTEMDRIVE%\IT\CleanUp.log
+ECHO Started: %SDATE% %STIME%
+ECHO Finished: %FDATE% %FTIME%
+ECHO Elapsed: %ELAPSED%
+ECHO Total: %total%
+if %a% NEQ X ECHO Cookies: %a%
+if %b% NEQ X ECHO Internet History: %b%
+if %c% NEQ X ECHO Local Temp Files: %c%
+if %d% NEQ X ECHO Temporary Internet Files: %d%
+if %e% NEQ X ECHO Windows Temp Files: %e%
+if %f% NEQ X ECHO Internet History: %f%
+if %g% NEQ X ECHO Temporary Internet Files: %g%
+if %h% NEQ X ECHO Local Temp Files: %h%
+echo.
+echo Window will close in 30 seconds automatically. . .
+ping -n 30 127.0.0.1>nul
+pause
+goto END
+
+:COPY
+if not exist "%SYSTEMDRIVE%\IT" md "%SYSTEMDRIVE%\IT"
+copy "CleanUp.bat" "%SYSTEMDRIVE%\IT\CleanUp.bat"
+if not exist "%SYSTEMDRIVE%\IT\CleanUp.bat" goto FAIL
+cls
+goto START
+
+:FAIL
+cls
+color 4F
+echo.
+echo "%SYSTEMDRIVE%\IT\CleanUp.bat" not found
+echo.
+echo Copy CleanUp.bat to "%SYSTEMDRIVE%\IT"
+pause
+goto END
+
+:END
