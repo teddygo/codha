@@ -1,0 +1,2291 @@
+// Smart IBL Loader V0.18 Alpha
+// Tested in Maya 8.5, 2008 and 2009 on Windows XP, Vista 64-bit and MacOS X
+// Maya-Version by Volker Heisterberg (volk@renderwahnsinn.de)
+// Smart Image Based Ligthing is a interchangeable standard for High Dynamic Range Images by Christian Bloch & Christian Bauer
+// For more infos go to http://www.smartIBL.com/ !
+// Last changed: 14.07.2009
+
+// Notes:
+
+// - put this script in your maya script folder
+// - enter sIBL at the command line
+// - if you don«t want to set the folder every time you 
+//   restart maya you should define an environment variable called sIBL containg your library path
+// - download and install the puppet shaders from http://www.puppet.tfdv.com/download/shaders_p_e.shtml to use the new "pass final gather" - feature
+
+// Version history:
+
+// V0.1alpha:
+// First preview release
+
+// V0.11alpha (12.02.2004):
+// - show details (Name/Author/Location) of selected SDR-File
+// - delete previous setup
+// - keylight is still cumbersome, but better
+// - auto-set render globals
+// - disable default light
+
+// V0.12alpha (16.02.2004):
+// - checks for env variable SDR for default directory
+
+// V0.13alpha
+// - scientific approach for keyLights
+// - keyLights now work in MAYA 8.0 and above, too
+
+// V0.14alpha
+// - name revision: SDR is now called sIBL
+// - added support for comments
+
+// V0.141alpha
+// - fixed a bug: folder names may now contain a -
+
+// V0.15alpha (06.09.2007)
+// - validate sIBL-Folder
+// - add "/" after the folder name if the user has forgotten
+// - env lighting is now possible via mental ray ibl-node
+// - works now on MacOS X
+// - matched scene orientation
+// - light can cast shadows now
+
+// V0.16alpha (05.03.2008)
+// - script is now checking sIBL-Folder and filtering incorrect files
+// - fixed glow-bug with MIA materials (thanks to mantered!)
+// - added support for production shaders (thanks to Matt Estela!)
+
+// V0.17alpha (20.10.2008)
+// - added support for Maya 2008
+// - fixed bug with ibl-sphere flipped and wrong rotations in Maya 2008 and above (thanks to Fexlex for reporting!)
+// - added linear mode (thanks to Kel Solar!)
+// - added support of the gamma parameters from the ibl - file, be aware that your renderings may look different now!
+// - added function to pass on final gather (thanks to Filip Orrby!)
+
+// V0.18alpha
+// - increased info space
+// - Height parameter and additional lights are now supported
+// - uses optionVar now, you only need to set the directory once. The environment variable still has a higher priority!
+
+
+// Known Issues:
+// - Key light doesn«t work properly
+// - changing the sIBL-path crashes maya on macOS X sometimes
+// - don«t use a background when rendering with mr-ibl or spheres for proper results,
+//   if you want to use all components in one render pass download the puppet shaders and use the
+//   function to "pass on final gather".
+
+// changes made at futureworks : change_id : id01_nish
+// in proc sIBL, added check for optionvar to image textures on isilon (10.10.35.93)
+// line 1293, change default sIBL to isilon
+// needs xnview to make thumbnails with text as a front layer
+// 
+
+// global string $commandLDR;
+
+global proc loadTDR(string $filename)
+{
+	string $myTDR=`textFieldGrp -q -text tdrTest`;
+	string $fullPath = $myTDR + $filename + "/";
+
+	// ldrTest: Verzeichnis durchsuchen
+	string $FL[] = `getFileList -fld ($fullPath) -filespec "*.ibl"`;
+
+	if (size($FL)!=0)  
+	{
+		string $filePath = $fullPath + $FL[0];
+
+		$fileId = fopen($filePath,"r");
+		if ($fileId!=0)
+		{
+			// check if tdr-file is valid
+
+			string $nextWord = `fgetword $fileId`;
+			if ($nextWord!="[Header]")
+			{
+				// this seems to be no sdr-file
+				print ("texture sibl not valid\n");
+				textScrollList -e -ri $filename TDRtsl;
+			}
+			// check contentsourds
+			// first disbale ...
+
+			checkBox -e -en 0 -v 0 checkEnvTDR;
+			checkBox -e -en 0 -v 0 checkKeylightTDR;
+			checkBox -e -en 0 -v 0 checkAddLightsTDR;
+			checkBox -e -en 0 -v 0 checkRefTDR;
+			checkBox -e -en 0 -v 0 checkBackTDR;
+
+			while (!`feof $fileId`)
+			{
+				string $nextWord = `fgetword $fileId`;
+				switch ($nextWord) {
+					case "[Sun]":
+					checkBox -e -en 1 checkKeylightTDR;
+					break;
+					case "[Enviroment]":
+					checkBox -e -en 1 checkEnvTDR;
+					break;
+					case "[Reflection]":
+					checkBox -e -en 1 checkRefTDR;
+					break;
+					case "[Background]":
+					checkBox -e -en 1 checkBackTDR;
+					break;
+					case "[Light1]":
+					checkBox -e -en 1 checkAddLightsTDR;
+					}
+			}
+			// rrrrreeewind
+			frewind $fileId;
+			// Search for ICOfile
+			$nextWord = `fgetword  $fileId`;
+			while ($nextWord!="ICOfile")
+			{
+				$nextWord = `fgetword  $fileId`;
+			}
+			fgetword $fileId;
+			string $filename = `fgetword $fileId`;
+			string $buffer[];
+			tokenize $filename "\"" $buffer;
+			string $imageName = $fullPath + $buffer[0];
+
+			image -e -image $imageName refPicTDR;
+
+			/* Details */
+
+			// get details from sdr-file
+			$nextWord = `fgetword  $fileId`;
+
+			// search for "Name"
+			while (($nextWord!="Name")&&!`feof $fileId`)
+			{
+				$nextWord = `fgetword $fileId`;
+			}
+			// das = auslesen und wegschmeissen
+			fgetword $fileId;
+			// den Namen auslesen
+			// ich will sicher gehen dass ich auch Namen, die aus mehreren Wörtern
+			// bestehen, richtig lesen kann:
+			string $puffer = `fgetword $fileId`;
+			string $tdrName = $puffer;
+			while (($puffer!="Author")&&!`feof $fileId`)
+			{
+				$puffer = `fgetword $fileId`;
+				$tdrName = $tdrName + " " + $puffer;
+			}
+			// die Anfuehrungszeichen entfernen
+			tokenize $tdrName "\"" $buffer;
+			// $tdrName zuweisen
+			$tdrName = "" + $buffer[0];
+			
+			// search for "Author"
+			
+			//while (($nextWord!="Author")&&!`feof $fileId`)
+			//{
+			//	  $nextWord = `fgetword $fileId`;
+			//
+			// das = auslesen und wegschmeissen
+			fgetword $fileId;
+			// den Autorennamen auslesen
+			$puffer = `fgetword $fileId`;
+			string $aut = $puffer;
+			while (($puffer!="Location")&&!`feof $fileId`)
+			{
+				$puffer = `fgetword $fileId`;
+				$aut = $aut + " " + $puffer;
+			}
+			// die Anfuehrungszeichen entfernen
+			tokenize $aut "\"" $buffer;
+			// wieder $aut zuweisen
+			$aut = "" + $buffer[0];
+			
+			// search for "Location"
+			//while (($nextWord!="Location")&&!`feof $fileId`)
+			//{
+			//	  $nextWord = `fgetword $fileId`;
+			//}
+			// das = auslesen und wegschmeissen
+			fgetword $fileId;
+			// den Locationnamen auslesen
+			$puffer = `fgetword $fileId`;
+			string $loc = $puffer;
+			while (($puffer!="Comment")&&!`feof $fileId`)
+			{
+				$puffer = `fgetword $fileId`;
+				$loc = $loc + " " + $puffer;
+			}
+			// die Anfuehrungszeichen entfernen
+			tokenize $loc "\"" $buffer;
+			// wieder $loc zuweisen
+			$loc = "" + $buffer[0]; 			
+			
+			// print ("Starting search, puffer:" + $puffer + "\n");
+			// das = auslesen und wegschmeissen
+			fgetword $fileId;
+			string $comment = "";
+			if	($puffer == "Comment")
+			{
+				while ($puffer!="[Background]"&&!`feof $fileId`)
+				{
+					$puffer = `fgetword $fileId`;
+					// print ("Puffer:" + $puffer + "\n");
+					if ($puffer != "[Background]") $comment = $comment + " " + $puffer;
+				}
+			}
+			// die Anfuehrungszeichen entfernen
+			tokenize $comment "\"" $buffer;
+			$comment = $buffer[1];
+
+			
+			// Strings bauen
+			string $nText = "Name:" + $tdrName;
+			string $lText = "Location:" + $loc;
+			string $aText = "Author:" + $aut;
+			string $cText = "Comment:" + $comment;
+			
+			// Details anzeigen
+			text -e -l $nText nameTextTDR;
+			text -e -l $lText locationTextTDR;
+			text -e -l $aText authorTextTDR;
+			text -e -l $cText commentTextTDR;
+			//}	
+		}		 
+		fclose($fileId);
+	}
+	else 
+	{
+		textScrollList -e -ri $filename TDRtsl;
+	}
+}
+
+global proc loadLDR(string $filename)
+{
+	string $myLDR=`textFieldGrp -q -text ldrTest`;
+	string $fullPath = $myLDR + $filename + "/";
+
+	// ldrTest: Verzeichnis durchsuchen
+	string $FL[] = `getFileList -fld ($fullPath) -filespec "*.ibl"`;
+
+	if (size($FL)!=0)  
+	{
+		string $filePath = $fullPath + $FL[0];
+
+		$fileId = fopen($filePath,"r");
+		if ($fileId!=0)
+		{
+			// check if ldr-file is valid
+
+			string $nextWord = `fgetword $fileId`;
+			if ($nextWord!="[Header]")
+			{
+				// this seems to be no sdr-file
+				print ("light sibl not valid\n");
+				textScrollList -e -ri $filename LDRtsl;
+			}
+			// check contentsourds
+			// first disbale ...
+
+			checkBox -e -en 0 -v 0 checkEnvLDR;
+			checkBox -e -en 0 -v 0 checkKeylightLDR;
+			checkBox -e -en 0 -v 0 checkAddLightsLDR;
+			checkBox -e -en 0 -v 0 checkRefLDR;
+			checkBox -e -en 0 -v 0 checkBackLDR;
+
+			while (!`feof $fileId`)
+			{
+				string $nextWord = `fgetword $fileId`;
+				switch ($nextWord) {
+					case "[Sun]":
+					checkBox -e -en 1 checkKeylightLDR;
+					break;
+					case "[Enviroment]":
+					checkBox -e -en 1 checkEnvLDR;
+					break;
+					case "[Reflection]":
+					checkBox -e -en 1 checkRefLDR;
+					break;
+					case "[Background]":
+					checkBox -e -en 1 checkBackLDR;
+					break;
+					case "[Light1]":
+					checkBox -e -en 1 checkAddLightsLDR;
+					}
+			}
+			// rrrrreeewind
+			frewind $fileId;
+			// Search for ICOfile
+			$nextWord = `fgetword  $fileId`;
+			while ($nextWord!="ICOfile")
+			{
+				$nextWord = `fgetword  $fileId`;
+			}
+			fgetword $fileId;
+			string $filename = `fgetword $fileId`;
+			string $buffer[];
+			tokenize $filename "\"" $buffer;
+			string $imageName = $fullPath + $buffer[0];
+
+			image -e -image $imageName refPicLDR;
+
+			/* Details */
+
+			// get details from sdr-file
+			$nextWord = `fgetword  $fileId`;
+
+			// search for "Name"
+			while (($nextWord!="Name")&&!`feof $fileId`)
+			{
+				$nextWord = `fgetword $fileId`;
+			}
+			// das = auslesen und wegschmeissen
+			fgetword $fileId;
+			// den Namen auslesen
+			// ich will sicher gehen dass ich auch Namen, die aus mehreren Wörtern
+			// bestehen, richtig lesen kann:
+			string $puffer = `fgetword $fileId`;
+			string $ldrName = $puffer;
+			while (($puffer!="Author")&&!`feof $fileId`)
+			{
+				$puffer = `fgetword $fileId`;
+				$ldrName = $ldrName + " " + $puffer;
+			}
+			// die Anfuehrungszeichen entfernen
+			tokenize $ldrName "\"" $buffer;
+			// $ldrName zuweisen
+			$ldrName = "" + $buffer[0];
+			
+			// search for "Author"
+			
+			//while (($nextWord!="Author")&&!`feof $fileId`)
+			//{
+			//	  $nextWord = `fgetword $fileId`;
+			//
+			// das = auslesen und wegschmeissen
+			fgetword $fileId;
+			// den Autorennamen auslesen
+			$puffer = `fgetword $fileId`;
+			string $aut = $puffer;
+			while (($puffer!="Location")&&!`feof $fileId`)
+			{
+				$puffer = `fgetword $fileId`;
+				$aut = $aut + " " + $puffer;
+			}
+			// die Anfuehrungszeichen entfernen
+			tokenize $aut "\"" $buffer;
+			// wieder $aut zuweisen
+			$aut = "" + $buffer[0];
+			
+			// search for "Location"
+			//while (($nextWord!="Location")&&!`feof $fileId`)
+			//{
+			//	  $nextWord = `fgetword $fileId`;
+			//}
+			// das = auslesen und wegschmeissen
+			fgetword $fileId;
+			// den Locationnamen auslesen
+			$puffer = `fgetword $fileId`;
+			string $loc = $puffer;
+			while (($puffer!="Comment")&&!`feof $fileId`)
+			{
+				$puffer = `fgetword $fileId`;
+				$loc = $loc + " " + $puffer;
+			}
+			// die Anfuehrungszeichen entfernen
+			tokenize $loc "\"" $buffer;
+			// wieder $loc zuweisen
+			$loc = "" + $buffer[0]; 			
+			
+			// print ("Starting search, puffer:" + $puffer + "\n");
+			// das = auslesen und wegschmeissen
+			fgetword $fileId;
+			string $comment = "";
+			if	($puffer == "Comment")
+			{
+				while ($puffer!="[Background]"&&!`feof $fileId`)
+				{
+					$puffer = `fgetword $fileId`;
+					// print ("Puffer:" + $puffer + "\n");
+					if ($puffer != "[Background]") $comment = $comment + " " + $puffer;
+				}
+			}
+			// die Anfuehrungszeichen entfernen
+			tokenize $comment "\"" $buffer;
+			$comment = $buffer[1];
+
+			
+			// Strings bauen
+			string $nText = "Name:" + $ldrName;
+			string $lText = "Location:" + $loc;
+			string $aText = "Author:" + $aut;
+			string $cText = "Comment:" + $comment;
+			
+			// Details anzeigen
+			text -e -l $nText nameTextLDR;
+			text -e -l $lText locationTextLDR;
+			text -e -l $aText authorTextLDR;
+			text -e -l $cText commentTextLDR;
+			//}	
+		}		 
+		fclose($fileId);
+	}
+	else 
+	{
+		textScrollList -e -ri $filename LDRtsl;
+	}
+}
+
+
+global proc loadSDR(string $filename)
+{
+	print ("loadsdr $filename ..."+$filename+"\n");
+    string $mySDR=`textFieldGrp -q -text Test`;
+    string $fullPath = $mySDR + $filename + "/"; 
+    // print ($fullPath + "\n");
+    
+    // Test: Verzeichnis durchsuchen
+    string $FL[] = `getFileList -fld ($fullPath) -filespec "*.ibl"`;
+    if (size($FL)!=0)  
+        {
+        string $filePath = $fullPath + $FL[0];
+        $fileId = fopen($filePath,"r");
+        if ($fileId!=0)
+        {
+            // check if sdr-file is valid
+            string $nextWord = `fgetword $fileId`;
+            if ($nextWord!="[Header]")
+            {
+                // this seems to be no sdr-file
+                print ("sibl not valid\n");
+                textScrollList -e -ri $filename tsl;
+            }
+            // check contentsourds
+            // first disbale ...
+            checkBox -e -en 0 -v 0 checkEnv;
+            checkBox -e -en 0 -v 0 checkKeylight;
+            checkBox -e -en 0 -v 0 checkAddLights;
+            checkBox -e -en 0 -v 0 checkRef;
+            checkBox -e -en 0 -v 0 checkBack;
+            while (!`feof $fileId`)
+                {
+                    string $nextWord = `fgetword $fileId`;
+                    switch ($nextWord) {
+                        case "[Sun]":
+                        checkBox -e -en 1 checkKeylight;
+                        break;
+                        case "[Enviroment]":
+                        checkBox -e -en 1 checkEnv;
+                        break;
+                        case "[Reflection]":
+                        checkBox -e -en 1 checkRef;
+                        break;
+                        case "[Background]":
+                        checkBox -e -en 1 checkBack;
+                        break;
+                        case "[Light1]":
+                        checkBox -e -en 1 checkAddLights;
+                        }
+                }
+            // rrrrreeewind
+            frewind $fileId;
+            // Search for ICOfile
+            $nextWord = `fgetword  $fileId`;
+            while ($nextWord!="ICOfile")
+                {
+                    $nextWord = `fgetword  $fileId`;
+                }
+            fgetword $fileId;
+            string $filename = `fgetword $fileId`;
+            string $buffer[];
+            tokenize $filename "\"" $buffer;
+            string $imageName = $fullPath + $buffer[0];
+            //print $imageName;
+   	        image -e -image $imageName refPic;
+   	        
+   	        /* Details */
+   	        
+   	        // get details from sdr-file
+   	        $nextWord = `fgetword  $fileId`;
+   	        
+   	        // search for "Name"
+   	        while (($nextWord!="Name")&&!`feof $fileId`)
+   	        {
+   	            $nextWord = `fgetword $fileId`;
+   	        }
+   	        // das = auslesen und wegschmeissen
+   	        fgetword $fileId;
+   	        // den Namen auslesen
+   	        // ich will sicher gehen dass ich auch Namen, die aus mehreren Wörtern
+   	        // bestehen, richtig lesen kann:
+   	        string $puffer = `fgetword $fileId`;
+   	        string $sdrName = $puffer;
+   	        while (($puffer!="Author")&&!`feof $fileId`)
+   	        {
+   	            $puffer = `fgetword $fileId`;
+   	            $sdrName = $sdrName + " " + $puffer;
+   	        }
+   	        // die Anfuehrungszeichen entfernen
+   	        tokenize $sdrName "\"" $buffer;
+   	        // $sdrName zuweisen
+   	        $sdrName = "" + $buffer[0];
+   	        
+   	        // search for "Author"
+   	        
+   	        //while (($nextWord!="Author")&&!`feof $fileId`)
+   	        //{
+   	        //    $nextWord = `fgetword $fileId`;
+   	        //
+   	        // das = auslesen und wegschmeissen
+   	        fgetword $fileId;
+   	        // den Autorennamen auslesen
+   	        $puffer = `fgetword $fileId`;
+   	        string $aut = $puffer;
+   	        while (($puffer!="Location")&&!`feof $fileId`)
+   	        {
+   	            $puffer = `fgetword $fileId`;
+   	            $aut = $aut + " " + $puffer;
+   	        }
+   	        // die Anfuehrungszeichen entfernen
+   	        tokenize $aut "\"" $buffer;
+   	        // wieder $aut zuweisen
+   	        $aut = "" + $buffer[0];
+   	        
+   	        // search for "Location"
+   	        //while (($nextWord!="Location")&&!`feof $fileId`)
+   	        //{
+   	        //    $nextWord = `fgetword $fileId`;
+   	        //}
+   	        // das = auslesen und wegschmeissen
+   	        fgetword $fileId;
+   	        // den Locationnamen auslesen
+   	        $puffer = `fgetword $fileId`;
+   	    	string $loc = $puffer;
+   	        while (($puffer!="Comment")&&!`feof $fileId`)
+   	        {
+   	            $puffer = `fgetword $fileId`;
+   	            $loc = $loc + " " + $puffer;
+   	        }
+   	        // die Anfuehrungszeichen entfernen
+   	        tokenize $loc "\"" $buffer;
+   	        // wieder $loc zuweisen
+   	        $loc = "" + $buffer[0];  	        
+   	        
+   	        // print ("Starting search, puffer:" + $puffer + "\n");
+   	        // das = auslesen und wegschmeissen
+   	        fgetword $fileId;
+   	        string $comment = "";
+   	        if	($puffer == "Comment")
+   	        {
+   	        	while ($puffer!="[Background]"&&!`feof $fileId`)
+   	        	{
+   	       			$puffer = `fgetword $fileId`;
+   	        		// print ("Puffer:" + $puffer + "\n");
+   	        		if ($puffer != "[Background]") $comment = $comment + " " + $puffer;
+   	        	}
+   	        }
+   	        // die Anfuehrungszeichen entfernen
+   	        tokenize $comment "\"" $buffer;
+   	        $comment = $buffer[1];
+   	        
+   	        
+   	        // Strings bauen
+   	        string $nText = "Name:" + $sdrName;
+   	        string $lText = "Location:" + $loc;
+   	        string $aText = "Author:" + $aut;
+   	        string $cText = "Comment:" + $comment;
+   	        
+   	        // Details anzeigen
+   	        text -e -l $nText nameText;
+   	        text -e -l $lText locationText;
+   	        text -e -l $aText authorText;
+   	        text -e -l $cText commentText;
+   	        
+   	        
+        }   
+   fclose($fileId);
+    }
+    else 
+        {
+        textScrollList -e -ri $filename tsl;
+        }
+}
+
+proc connect( string $attr, string $place, string $file )
+{
+  connectAttr -f ( $place + "." + $attr ) ( $file + "." + $attr );
+}
+
+global proc load2TDR(string $filename)
+{
+	// mesh and its hdr image should be deleted
+    $delTest = `checkBox -q -v checkDelTDR`;
+	if ($delTest!=0)
+	{
+	    print "deleting ...";
+	    select -cl;
+	    
+		//string $filename = "Synthetic_Disc_A";
+		string $command = "ls \"siblMesh_\*\:\*\"";
+		string $selectionList[] = eval($command);
+		if (size($selectionList)!=0)
+		{
+		    //select -add ("siblMesh_*"+":*");
+		    select -add $selectionList;
+		}
+	
+	    string $Selected[] = `ls -sl`;
+	    if (size($Selected)!=0)
+	    {
+	    delete;
+	    }
+	
+	}
+	print "work in progress...\n";
+
+}
+
+
+global proc load2LDR(string $filename)
+{
+	// mesh and its hdr image should be deleted
+    $delTest = `checkBox -q -v checkDelLDR`;
+	if ($delTest!=0)
+	{
+	    print "deleting ...";
+	    select -cl;
+	    
+		//string $filename = "Synthetic_Disc_A";
+		string $command = "ls \"siblMesh_\*\:\*\"";
+		string $selectionList[] = eval($command);
+		if (size($selectionList)!=0)
+		{
+		    //select -add ("siblMesh_*"+":*");
+		    select -add $selectionList;
+		}
+	
+	    string $Selected[] = `ls -sl`;
+	    if (size($Selected)!=0)
+	    {
+	    delete;
+	    }
+	
+	}
+
+    // check if I should delete the existing setup
+	string $myLDR = `textFieldGrp -q -text ldrTest`;
+   	select -cl;
+
+   	file -import -type "OBJ" -ra true -namespace ("siblMesh_" + $filename) -options "mo=1"  -pr -loadReferenceDepth "all" ($myLDR+"/"+$filename+"/"+$filename + ".obj");
+
+   	// calculate $file
+   	string $hdrFile = $myLDR + $filename + "/" + $filename + ".hdr";
+   	print ("$hdrFile "+$hdrFile +"\n");
+   	
+	// Create a Lambert Material, with Shading Group
+	string $material = `shadingNode -asShader lambert -name siblLambert`;
+	string $SG = `sets -renderable true -noSurfaceShader true -empty -name siblLambertSG`;
+	
+	// Create a File Texture and link to Material color
+	string $fileNode = `shadingNode -asTexture file -name myFile`;
+	connectAttr -f ( $fileNode + ".outColor" ) ( $material + ".incandescence" );
+
+	// Assign file to File Texture Name
+	setAttr -type "string" ( $fileNode + ".fileTextureName" ) $hdrFile;
+
+	//place 2dtexturenode
+	string $placeName = ( "place_" + $fileNode );
+	$placeName = `shadingNode -asUtility place2dTexture -name $placeName`;
+
+	// Connect necessary plugs from place2dTexture node
+	// Note: These utilize the connect() proc defined above
+	connect "coverage" $placeName $fileNode;
+	connect "translateFrame" $placeName $fileNode;
+	connect "rotateFrame" $placeName $fileNode;
+	connect "stagger" $placeName $fileNode;
+	connect "wrapU" $placeName $fileNode;
+	connect "wrapV" $placeName $fileNode;
+	connect "repeatUV" $placeName $fileNode;
+	connect "offset" $placeName $fileNode;
+	connect "rotateUV" $placeName $fileNode;
+	connect "mirrorU" $placeName $fileNode;
+	connect "mirrorV" $placeName $fileNode;
+
+	// connect the placement UV plugs to the file node
+	connectAttr -f ( $placeName + ".outUV" ) ( $fileNode + ".uv" );
+	connectAttr -f ( $placeName + ".outUvFilterSize" ) ( $fileNode + ".uvFilterSize" );	
+
+	// setAttr -type "string" file1.fileTextureName "";
+	
+	// assign material to object
+	sets -e -forceElement $SG ("siblMesh_"+ $filename+":Mesh");
+
+}
+
+global proc load2SDR(string $filename)
+{
+
+    // check if I should delete the existing setup
+    $delTest = `checkBox -q -v checkDel`;
+    if ($delTest!=0)
+    {
+        select -cl;
+        string $command = "ls \"SUN\*\"";
+        string $selectionList[] = eval($command);
+        if (size($selectionList)!=0)
+        {
+            select -add "SUN*";
+        }
+        string $command = "ls \"bg\*\"";
+        string $selectionList[] = eval($command);
+        if (size($selectionList)!=0)
+        {
+            select -add "bg*";
+        }
+        string $command = "ls \"refSphere_\*\"";
+        string $selectionList[] = eval($command);
+        if (size($selectionList)!=0)
+        {
+            select -add "refSphere_*";
+        }
+        string $command = "ls \"ENV_\*\"";
+        string $selectionList[] = eval($command);
+        if (size($selectionList)!=0)
+        {
+            select -add "ENV_*";
+        }
+        string $command = "ls \"env_\*\"";
+        string $selectionList[] = eval($command);
+        if (size($selectionList)!=0)
+        {
+            select -add "env_*";
+        }
+        string $command = "ls \"ref_\*\"";
+        string $selectionList[] = eval($command);
+        if (size($selectionList)!=0)
+        {
+            select -add "ref_*";
+        }
+        string $command = "ls \"ss_\*\"";
+        string $selectionList[] = eval($command);
+        if (size($selectionList)!=0)
+        {
+            select -add "ss_*";
+        }
+        
+        string $iblNode[] = `ls -fl -typ mentalrayIblShape`;
+        
+        for ($iblNod in $iblNode)
+        {
+        	select -add $iblNod;
+        	select -add (`listTransforms $iblNod`);
+        }
+        
+        /*string $command = "ls \"mentalrayIbl\*\"";
+        string $selectionList[] = eval($command);
+        if (size($selectionList)!=0)
+        {
+            select -add "mentalrayIbl*";
+        }
+        // check for ibl-Node
+        string $connectionPlug = `connectionInfo -sfd mentalrayGlobals.imageBasedLighting`;
+        if ($connectionPlug != "")
+        {
+		string $tempo[];
+		tokenize $connectionPlug "." $tempo;
+		select -add $tempo[0];
+	}*/
+	   // select raySwitchStuff
+	   string $rayStuff[] = `ls "raySwitch_*"`;
+	   if (size($rayStuff)>0) select -add "raySwitch_*";
+	   
+	   
+	   string $mipStuff[] = `ls "sIBL_rayswitch_*"`;
+	   if (size($mipStuff)>0) select -add "sIBL_rayswitch_*";
+	   
+	   string $eyeGammaStuff[] = `ls "eyeGamma*"`;
+	   if (size($eyeGammaStuff)>0) select -add "eyeGamma*";
+	   
+	   string $eyeGammaStuff[] = `ls "envGamma*"`;
+	   if (size($eyeGammaStuff)>0) select -add "envGamma*";
+	   
+	   string $eyeGammaStuff[] = `ls "refGamma*"`;
+	   if (size($eyeGammaStuff)>0) select -add "refGamma*";
+	   
+	   // select lens shader
+	   string $lensShader[] = `ls -fl -typ mia_exposure_simple`;
+	   for ($lS in $lensShader)
+	   {
+	   	select -add $lS;
+	   }
+	   
+	   // delete puppet shader and mip_continue
+	   select -add `ls "REF_mc_*"`;
+	   select -add `ls "REF_prt_*"`;
+	   select -add `ls "BG_mc_*"`;
+	   select -add `ls "BG_prt_*"`;
+	   
+	   select -add `ls "LIGHT_*"`;
+	   
+	   
+        string $Selected[] = `ls -sl`;
+        if (size($Selected)!=0)
+        {
+        delete;
+        }
+
+   }
+   	
+   	//check if I should display textures
+    $texTest = `checkBox -q -v checkTex`;
+    if ($texTest==1)
+    {
+        DisplayShadedAndTextured;
+    }
+   	
+   	//check if I should set render globals
+   	$renTest = `checkBox -q -v checkRen`;
+   	if ($renTest==1)
+   	{
+   	    setAttr defaultRenderGlobals.currentRenderer -type "string" mentalRay;
+   	    updateRendererUI();
+            setAttr "miDefaultOptions.finalGather" 1;
+            setAttr "miDefaultOptions.maxSamples" 1;
+            setAttr "miDefaultOptions.minSamples" -1;
+            setAttr "miDefaultOptions.jitter" 1;
+    }
+    
+    //disable default light
+    setAttr "defaultRenderGlobals.enableDefaultLight" 0;
+    
+    string $mySDR=`textFieldGrp -q -text Test`;
+    string $fullPath = $mySDR + $filename + "/"; 
+    
+    // Test: Verzeichnis durchsuchen
+    string $FL[] = `getFileList -fld $fullPath -filespec "*.ibl"`;
+    string $filePath = $fullPath + $FL[0];
+    $fileId = fopen(($filePath),"r");
+    if ($fileId!=0)
+    {    
+   	    string $nextWord = `fgetword $fileId`;
+   	    
+   	    // search for "Height"
+   	    int $heightDef = 0;
+   	    float $heightVal = 0;
+   	    while (($nextWord!="Height")&&!`feof $fileId`)
+   	    {
+   	        $nextWord = `fgetword $fileId`;
+   	    }
+   	     
+   	    if ($nextWord=="Height") 
+   	    {
+   	    	// das = auslesen und wegschmeissen
+   	       	fgetword $fileId;
+   	        $heightDef = 1;
+   	        $heightVal = (float) `fgetword $fileId`;
+   	    }
+   	    frewind $fileId;
+   	    
+   	    // check for raySwitch
+   	    $rayTest = `checkBox -q -v checkRaySwitch`;
+   	    if ($rayTest!=0)
+   	    {
+   	    // create raySwitch setup
+   	    string $raySwitchSphere[] = `polySphere -r 1 -sx 20 -sy 20 -ax 0 1 0 -cuv 1 -ch 1 -n ("raySwitch_" + $filename)`;
+   	    string $raySwitchShape[]= `listRelatives -s $raySwitchSphere[0]`;
+   	    
+   	    scale -r -50 50 50;
+   	    rotate -r 0 108 0;
+   	    
+   	    
+   	    if ($heightDef)
+   	    {
+   	    	move -r 0 $heightVal 0;
+   	    }
+   	    
+   	    while($nextWord!="BGfile"&&!`feof $fileId`)
+        {
+            $nextWord = `fgetword $fileId`;
+        }
+            fgetword $fileId;
+            string $BGfile= `fgetword $fileId`;
+            string $buffer[];
+            tokenize $BGfile "\"" $buffer;
+            string $bgFile = encodeString($fullPath) + $buffer[0];
+            string $surfaceShader = `shadingNode -asShader surfaceShader -name ("raySwitch_" + $filename)`;
+            string $surfaceSG = ` sets -renderable true -noSurfaceShader true -empty -name ($surfaceShader + "SG")`;
+            connectAttr -f ($surfaceShader + ".outColor")  ($surfaceSG + ".surfaceShader");
+            sets -e -fe $surfaceSG $raySwitchSphere[0];
+            
+            string $mrs = `shadingNode -asShader mip_rayswitch -n ("sIBL_rayswitch_" + $filename)`;
+            
+            connectAttr -f ($mrs + ".outValue") ($surfaceSG + ".miMaterialShader");
+            
+            // suppress maya shaders
+            setAttr ($surfaceSG + ".miExportMrMaterial") 1;
+            
+            // check if background is enabled
+   	        $backTest = `checkBox -q -v checkBack`;
+   	        
+   	        if ($backTest!=0)
+   	        {  
+   	            // connect bgFile to the lambert for reference only
+                string $fileNode = `shadingNode -at file -name ("bg_" + $filename)`;
+                setAttr -type "string" ($fileNode + ".fileTextureName") ($bgFile);
+                connectAttr -f ($fileNode + ".outColor") ($surfaceShader + ".outColor");
+                
+                // connect bgFile
+                string $eyeGamma = `shadingNode -asUtility gammaCorrect -name ("eyeGamma_" + $filename)`;
+                connectAttr -f ($fileNode + ".outColor") ($eyeGamma + ".value"); 
+                connectAttr -f ($eyeGamma + ".outValue") ($mrs + ".eye");
+                
+                // check for linear mode
+             	$linTest = `checkBox -q -v checkLin`;
+             	if ($linTest!=0) 
+             	{
+             		setAttr ($eyeGamma + ".gammaX") 0.4545;
+             		setAttr ($eyeGamma + ".gammaY") 0.4545;
+             		setAttr ($eyeGamma + ".gammaZ") 0.4545;
+             	}
+                
+                // get selected resolution
+                string $resStr[] = `textScrollList -q -si resTSL`;
+                int $res = (int) $resStr[0]; 
+                // set texture resolution
+                addAttr -ln resolution -at long -dv $res $surfaceShader;
+            }
+            
+            // search for EVfile
+            while ($nextWord!="EVfile"&&!`feof $fileId`)
+            {
+                $nextWord = `fgetword $fileId`;
+            }
+            fgetword $fileId;
+            string $EVfile = `fgetword $fileId`;
+            string $buffer[];
+            tokenize $EVfile "\"" $buffer;
+                        
+            // search for EVmulti
+            while ($nextWord!="EVmulti"&&!`feof $fileId`)
+            { 
+                $nextWord = `fgetword $fileId`;
+            }
+                       
+            fgetword $fileId;
+            string $EVmulti = `fgetword $fileId`;
+            float $EVmult = (float) $EVmulti;
+            
+            
+            // search for EVgamma
+	    while ($nextWord!="EVgamma"&&!`feof $fileId`)
+	    { 
+	    	$nextWord = `fgetword $fileId`;
+	    }
+	                           
+	    fgetword $fileId;
+	    string $EVgammaStr = `fgetword $fileId`;
+            float $EVgamma = (float) $EVgammaStr;
+                        
+            $envTest = `checkBox -q -v checkEnv`;
+            if ($envTest!=0)
+            {
+                // create env texture and connect it
+                string $fileNode =`shadingNode -at file -name ("env_" + $filename)`;
+                string $envTex = encodeString($fullPath) + $buffer[0];
+                setAttr -type "string" ("env_" + $filename + ".fileTextureName")  $envTex;
+                setAttr -type "double3" ($fileNode + ".colorGain") $EVmult $EVmult $EVmult;
+              	
+              	string $envGamma = `shadingNode -asUtility gammaCorrect -name ("envGamma_" + $filename)`;
+		connectAttr -f ($fileNode + ".outColor") ($envGamma + ".value"); 
+                connectAttr -f ($envGamma + ".outValue") ($mrs + ".finalgather");
+                
+                // check for linear mode
+		$linTest = `checkBox -q -v checkLin`;
+		if ($linTest!=1) 
+			{
+		       	setAttr ($envGamma + ".gammaX") $EVgamma;
+		      	setAttr ($envGamma + ".gammaY") $EVgamma;
+		      	setAttr ($envGamma + ".gammaZ") $EVgamma;
+             	}
+            }
+            
+            //search for REFfile
+            while($nextWord!="REFfile" &&!`feof $fileId`)
+            {
+                $nextWord = `fgetword $fileId`;
+            }
+            fgetword $fileId;
+            string $REFfile = `fgetword $fileId`;
+            string $REFbuffer[];
+            tokenize $REFfile "\"" $REFbuffer;
+               
+            //search for REFmulti
+            while($nextWord!="REFmulti" &&!`feof $fileId`)
+            {
+                $nextWord = `fgetword $fileId`;
+            }
+            fgetword $fileId;
+            string $REFMulti = `fgetword $fileId`;
+            float $REFmult = (float) $REFMulti;
+            
+            //search for REFgamma
+	    while($nextWord!="REFgamma" &&!`feof $fileId`)
+	    {
+	        $nextWord = `fgetword $fileId`;
+	    }
+	    fgetword $fileId;
+	    string $REFgammaStr = `fgetword $fileId`;
+            float $REFgamma = (float) $REFgammaStr;
+            
+            $refTest = `checkBox -q -v checkRef`;
+            if ($refTest!=0)
+            {
+               string $refNode = `shadingNode -at file -name ("ref_" + $filename)`;
+               string $refTex = encodeString($fullPath) + $REFbuffer[0];
+               // set image path
+               setAttr -type "string" ($refNode + ".fileTextureName") $refTex;
+               setAttr -type "double3" ($refNode + ".colorGain") $REFmult $REFmult $REFmult;
+               string $refGamma = `shadingNode -asUtility gammaCorrect -name ("refGamma_" + $filename)`;
+	       connectAttr -f ($refNode + ".outColor") ($refGamma + ".value");
+               connectAttr -f ($refGamma + ".outValue") ($mrs + ".reflection"); 
+               
+               // check for linear mode
+	       $linTest = `checkBox -q -v checkLin`;
+	       if ($linTest!=1) 
+	       	{
+	      		setAttr ($refGamma + ".gammaX") $REFgamma;
+	       		setAttr ($refGamma + ".gammaY") $REFgamma;
+	       		setAttr ($refGamma + ".gammaZ") $REFgamma;
+             	}
+            }
+            
+            
+   	    }
+   	    else
+   	    { 
+   	        // check if background is enabled
+   	        $backTest = `checkBox -q -v checkBack`;
+   	        if ($backTest!=0)
+   	        {  
+   	            //create backgroundSphere
+   	            // Nurbs sphere: 
+   	            // sphere -p 0 0 0 -ax 0 1 0 -ssw 0 -esw 360 -r 60 -d 3 -ut 0 -tol 0.01 -s 14 -nsp 8 -ch 1;
+   	            polySphere -r 1 -sx 20 -sy 20 -ax 0 1 0 -cuv 1 -ch 1;
+   	            rename ("bgSphere_" + $filename);
+                //scale -r 50 50 50 ;
+                // Stefan und Volks Weg: Anpassen der Umgebungskugeln
+                scale -r -50 50 50;
+                rotate -r 0 108 0;
+                
+                if ($heightDef)
+   	    		{
+   	    			move -r 0 $heightVal 0;
+   	    		}
+                
+                string $Selected[] = `ls -sl`;
+                // set bg-sphere attributes
+                 string $command = "setAttr bgSphere_" + $filename + ".castsShadows 0";
+                 eval($command);
+                 $command = " setAttr bgSphere_" + $filename + ".receiveShadows 0";
+                 eval($command);
+                $command = "setAttr bgSphere_" + $filename + ".motionBlur 0";
+                eval($command);
+                // turn off primaryVisibility so the bg is not included in final gather
+                $command = "setAttr bgSphere_" + $filename + ".primaryVisibility 0";
+                eval($command);
+                $command = "setAttr bgSphere_" + $filename + ".visibleInReflections 0";
+                eval($command);
+                $command = "setAttr bgSphere_" + $filename + ".visibleInRefractions 0";
+                eval($command);
+                $command = "setAttr bgSphere_" + $filename + ".doubleSided 0";
+                eval($command);
+                setAttr ("bgSphere_" + $filename + ".opposite") 1;
+                // setAttr ("bgSphere_" + $filename + ".miFinalGatherCast") 0;
+                // setAttr ("bgSphere_" + $filename + ".miFinalGatherReceive") 0;
+                
+                
+                // !!!
+                // string $command = "setAttr " + $bgSphere + ".rotateX 180";
+                // eval($command);
+                //search for BGfile
+                while($nextWord!="BGfile"&&!`feof $fileId`)
+                    {
+                        $nextWord = `fgetword $fileId`;
+                    }
+                 fgetword $fileId;
+                 string $BGfile= `fgetword $fileId`;
+                 string $buffer[];
+                 tokenize $BGfile "\"" $buffer;
+                 string $bgFile = encodeString($fullPath) + $buffer[0];
+                 string $bgFileNode = `shadingNode -at file -name ("bg_" + $filename)`;
+                 string $command = "setAttr -type \"string\" bg_" + $filename + ".fileTextureName \"" + $bgFile + "\" \"image\"";
+                 //string $command = "AEassignTextureCB bg_" + $filename + ".fileTextureName \"" + $bgFile + "\" \"image\"";
+                 eval ($command);
+                 $command = "shadingNode -asShader surfaceShader";
+                 eval($command);
+                 $command = "rename bgSs_" + $filename;
+                 eval($command);
+                 string $bgShadingGroup = `sets -renderable true -noSurfaceShader true -empty -name ("bgSs_" + $filename + "SG")`;
+                 $command = "select -r " + $Selected[0];
+                 eval($command);
+                 refreshAE;
+                 connectAttr -f ("bgSs_" + $filename + ".outColor") ($bgShadingGroup + ".surfaceShader");
+                 $command = "connectAttr -f bg_" + $filename + ".outColor bgSs_" + $filename + ".outColor";
+                 eval($command);
+                 $command = "sets -e -forceElement bgSs_" + $filename + "SG;";
+                 eval($command);
+                 //$command = " AEnewInt \"bgSs_" + $filename + ".resolution\" \"Resolution\" \"512\" ";
+                 
+                 
+                 // get selected resolution
+                 string $resStr[] = `textScrollList -q -si resTSL`;
+                 int $res = (int) $resStr[0]; 
+                 // set texture resolution
+                 $command = "addAttr -ln resolution -at long -dv " + $res + " bgSs_" + $filename;
+                 eval($command);
+                 refreshAE;
+                 $command = "setAttr \"bgSs_" + $filename + ".outMatteOpacity\" -type double3 0 0 0";
+                 eval($command);
+                 
+                 
+                 // check for puppet
+                 $puppetTest = `checkBox -q -v checkPuppet`;
+                 if ($puppetTest!=0)
+                 {
+                 	setAttr ($bgShadingGroup  + ".miExportMrMaterial") 1;
+                 	string $bgPRT = `shadingNode -asShader p_ray_type -name ("BG_prt_" + $filename)`;
+                 	connectAttr -f ($bgPRT + ".outValue") ($bgShadingGroup + ".miMaterialShader");
+                 	connectAttr -f ($bgFileNode + ".outColor") ($bgPRT + ".eye");
+               		connectAttr -f ($bgFileNode + ".outAlpha") ($bgPRT + ".eyeA");
+               		setAttr ($bgPRT +".enable_finalgather") 1;
+               		string $bgMc = `createNode mib_continue -name ("BG_mc_"+ $filename)`;
+               		connectAttr -f ($bgMc + ".outValue") ($bgPRT + ".finalgather");
+                 }
+                 
+                 
+            }
+            
+            
+            // %%%%%%%%%%%%%%%%%%%%%%%
+            // check if env is enabled
+            // %%%%%%%%%%%%%%%%%%%%%%%
+            
+            $envTest = `checkBox -q -v checkEnv`;
+            if ($envTest!=0)
+            {
+                // check for sphere instead of ibl-node
+                int $sphereTest = `checkBox -q -v checkGeo`;
+                if ($sphereTest!=0)
+                {
+                    // create ENV-sphere
+                    // default env-sphere
+                    //sphere -p 0 0 0 -ax 0 1 0 -ssw 0 -esw 360 -r 30 -d 3 -ut 0 -tol 0.01 -s 14 -nsp 8 -ch 1;
+                    polySphere -r 1 -sx 20 -sy 20 -ax 0 1 0 -cuv 1 -ch 1;
+                    //scale -r 51 51 51 ;
+                    // Stefan und Volks Weg: Anpassen der Umgebungskugeln
+                    scale -r -51 51 51 ;
+                    rotate -r 0 108 0;
+                    if ($heightDef)
+   	    			{
+   	    				move -r 0 $heightVal 0;
+   	    			}
+                
+                    rename ("ENV_" + $filename);
+                    pickWalk -d down;
+                        string $Selected[] = `ls -sl`;
+                        string $esName = $Selected[0];
+                        //refreshAE;
+                        // set env-sphere attributes
+                        setAttr ($esName + ".castsShadows") 0;
+                        setAttr ($esName + ".receiveShadows") 0;
+                setAttr ($esName + ".motionBlur") 0;
+                        setAttr ($esName + ".primaryVisibility") 0;
+                        setAttr ($esName + ".smoothShading") 0;
+                        setAttr ($esName + ".visibleInReflections") 0;
+                setAttr ($esName + ".visibleInRefractions") 1;
+                setAttr ($esName + ".doubleSided") 0;
+                        setAttr ($esName + ".opposite") 1;
+            
+                    // search for EVfile
+                    while ($nextWord!="EVfile"&&!`feof $fileId`)
+                         {
+                             $nextWord = `fgetword $fileId`;
+                         }
+                    fgetword $fileId;
+                    string $EVfile = `fgetword $fileId`;
+                    string $buffer[];
+                    tokenize $EVfile "\"" $buffer;
+                        
+                    // search for EVmulti
+                      while ($nextWord!="EVmulti"&&!`feof $fileId`)
+                      { 
+                            $nextWord = `fgetword $fileId`;
+                       }
+                       
+                        fgetword $fileId;
+                        string $EVmulti = `fgetword $fileId`;
+                        float $EVmult = (float) $EVmulti;
+                        
+                    // search for EVgamma
+		       while ($nextWord!="EVgamma"&&!`feof $fileId`)
+		       { 
+		       		$nextWord = `fgetword $fileId`;
+		       }
+		                           
+		       fgetword $fileId;
+		       string $EVgammaStr = `fgetword $fileId`;
+                       float $EVgamma = (float) $EVgammaStr;
+                        
+                    // create texture
+                       string $fileNode =`shadingNode -at file -name ("env_" + $filename)`;
+                       string $envTex = encodeString($fullPath) + $buffer[0];
+                       string $command = "setAttr -type \"string\" env_" + $filename + ".fileTextureName \"" + $envTex + "\" \"image\"";
+                           eval($command);
+                           // create shader
+                           $command = "shadingNode -asShader surfaceShader";
+                           eval($command);
+                           $command = "rename ss_" + $filename;
+                           eval($command);
+                           // create shading group
+                           $command = "sets -renderable true -noSurfaceShader true -empty -name ss_" + $filename + "SG";
+                           eval ($command);
+                           // select sphere
+                           $command = "select -r " + $Selected[0];
+                           eval($command);
+                           refreshAE;
+                           // connect shader to shading group
+                           $command = "connectAttr -f ss_" + $filename + ".outColor ss_" + $filename + "SG.surfaceShader";
+                           eval($command);
+                           // assign
+                           $command = "sets -e -forceElement ss_" + $filename + "SG;";
+                           eval($command);
+                           // create gamma
+                           string $envGamma = `shadingNode -asUtility gammaCorrect -name ("envGamma_" + $filename)`;
+			   connectAttr -f ("env_" + $filename + ".outColor") ($envGamma + ".value");
+			   
+			   // connect texture
+                           connectAttr -f ($envGamma + ".outValue") ("ss_" + $filename + ".outColor"); 
+                          
+                          setAttr -type "double3" ($fileNode + ".colorGain") $EVmult $EVmult $EVmult;
+                          
+                          // check for linear mode
+			  $linTest = `checkBox -q -v checkLin`;
+			  if ($linTest!=1) 
+			  {
+			   	setAttr ($envGamma + ".gammaX") $EVgamma;
+				setAttr ($envGamma + ".gammaY") $EVgamma;
+				setAttr ($envGamma + ".gammaZ") $EVgamma;
+			  }
+                          
+                          
+            }
+            else
+            {
+                // create ibl-node
+		miCreateIbl;                
+            	string $connectionPlug = `connectionInfo -sfd mentalrayGlobals.imageBasedLighting`;
+            	string $tempo[];
+            	tokenize $connectionPlug "." $tempo;
+            	string $iblNode = $tempo[0];
+            
+            // get transform
+             string $iblTransform[] = `listTransforms $iblNode`;
+            setAttr ($iblTransform[0] + ".scaleX") -51; 
+            setAttr ($iblTransform[0] + ".scaleY") 51;
+            setAttr ($iblTransform[0] + ".scaleZ") 51;
+            // setAttr ($iblTransform[0] + ".rotateY") 108;
+            
+            if ($heightDef)
+   	        {
+   	    		setAttr ($iblTransform[0] + ".translateY") $heightVal;						;	
+   	    	}
+            
+            // set ibl to texture 
+            setAttr ($iblNode + ".type") 1
+            ;
+            // get env-texture and set it 
+            // search for EVfile
+            while ($nextWord!="EVfile"&&!`feof $fileId`)
+            {
+                $nextWord = `fgetword $fileId`;
+            }
+            fgetword $fileId;
+            string $EVfile = `fgetword $fileId`;
+            string $buffer[];
+            tokenize $EVfile "\"" $buffer;                  
+            string $envTex = encodeString($fullPath) + $buffer[0];
+            
+            // search for EVmulti
+            while ($nextWord!="EVmulti"&&!`feof $fileId`)
+            {
+                $nextWord = `fgetword $fileId`;
+            }
+            fgetword $fileId;
+            string $EVmulti = `fgetword $fileId`;
+            float $EVmult = (float) $EVmulti;
+            
+            // search for EVgamma
+	    while ($nextWord!="EVgamma"&&!`feof $fileId`)
+	    { 
+	    	$nextWord = `fgetword $fileId`;
+            }
+	    		                           
+	    fgetword $fileId;
+	    string $EVgammaStr = `fgetword $fileId`;
+            float $EVgamma = (float) $EVgammaStr;
+            
+            string $envFile = `shadingNode -at file -n ("env_" + $filename)`;
+            setAttr -type "string"($envFile + ".fileTextureName") $envTex;
+            
+            // create gamma
+	    string $envGamma = `shadingNode -asUtility gammaCorrect -name ("envGamma_" + $filename)`;
+	    connectAttr -f ($envFile + ".outColor") ($envGamma + ".value");
+            connectAttr -f ($envGamma + ".outValue") ($iblNode + ".color");
+            
+            // check for linear mode
+	    $linTest = `checkBox -q -v checkLin`;
+	    if ($linTest!=1) 
+	    {
+	    	setAttr ($envGamma + ".gammaX") $EVgamma;
+	    	setAttr ($envGamma + ".gammaY") $EVgamma;
+	    	setAttr ($envGamma + ".gammaZ") $EVgamma;
+	    }
+            
+            setAttr -type "double3" ($iblNode + ".colorGain") $EVmult $EVmult $EVmult;
+            
+            select -cl;
+            
+             }
+        }
+            
+            // $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+            // check if reflection is enabled
+            // $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+            
+            $refTest = `checkBox -q -v checkRef`;
+            if ($refTest!=0)
+            {   
+                polySphere -r 1 -sx 20 -sy 20 -ax 0 1 0 -cuv 1 -ch 1;
+                rename ("refSphere_" + $filename);
+                scale -r -52 52 52 ;
+                rotate -r 0 108 0;
+                if ($heightDef)
+   	    		{
+   	    			move -r 0 $heightVal 0;
+   	    		}
+                string $Selected[] = `ls -sl`;
+                string $refSphere = $Selected[0];
+                    
+                // set ref-sphere attributes
+                 string $command = " setAttr " + $refSphere + ".castsShadows 0";
+                 eval($command);
+                $command = " setAttr " + $refSphere + ".motionBlur 0";
+                eval($command);
+                $command = "setAttr " + $refSphere + ".receiveShadows 0";
+                eval($command);
+                $command = " setAttr " + $refSphere + ".primaryVisibility 0";
+                eval($command);
+                $command = " setAttr " + $refSphere + ".doubleSided 0";
+                eval($command);
+                $command = " setAttr " + $refSphere + ".visibleInRefractions 1";
+                eval($command);
+                $command = " setAttr " + $refSphere + ".visibleInReflections 1";
+                eval($command);
+                $command = " setAttr " + $refSphere + ".opposite 1";
+                eval($command); 
+                //search for REFfile
+                while($nextWord!="REFfile" &&!`feof $fileId`)
+                    {
+                        $nextWord = `fgetword $fileId`;
+                    }
+               fgetword $fileId;
+               string $REFfile = `fgetword $fileId`;
+               string $REFbuffer[];
+               tokenize $REFfile "\"" $REFbuffer;
+               
+                //search for REFmulti
+                while($nextWord!="REFmulti" &&!`feof $fileId`)
+                    {
+                        $nextWord = `fgetword $fileId`;
+                    }
+               fgetword $fileId;
+               string $REFMulti = `fgetword $fileId`;
+               float $REFmult = (float) $REFMulti;
+               
+               // search for REFgamma
+	       while ($nextWord!="REFgamma"&&!`feof $fileId`)
+	            { 
+	       	    	$nextWord = `fgetword $fileId`;
+	       	    }                    
+	       fgetword $fileId;
+	       string $REFgammaStr = `fgetword $fileId`;
+               float $REFgamma = (float) $REFgammaStr;
+               
+               // creating texture for reflections
+               
+               string $refNode = `shadingNode -at file -name ("ref_" + $filename)`;
+               string $refTex = encodeString($fullPath) + $REFbuffer[0];
+               // set image path
+               string $command = "setAttr -type \"string\" ref_" + $filename + ".fileTextureName \"" + $refTex + "\" \"image\"";
+               eval($command);
+               // create shader
+               $command = "shadingNode -asShader surfaceShader -n ref_ss_" + $filename;
+               // print($command);
+               eval($command);
+               // create shadingGroup
+               string $refShadingGroup = `sets -renderable true -noSurfaceShader true -empty -name ("ref_ss_" + $filename + "SG")`;
+               // print($command);
+               eval($command);
+               // select reflection sphere
+               $command = "select -r refSphere_" + $filename;
+               eval($command);
+               // connect shader to shading Group
+               $command = "connectAttr -f ref_ss_" + $filename + ".outColor ref_ss_" + $filename + "SG.surfaceShader";
+               eval($command);
+               // assign
+               $command = "sets -e -forceElement ref_ss_" + $filename + "SG;";
+               eval($command);
+               
+               // create gamma
+	       string $refGamma = `shadingNode -asUtility gammaCorrect -name ("refGamma_" + $filename)`;
+	       connectAttr -f ($refNode + ".outColor") ($refGamma + ".value");
+	       			   
+	       // connect texture
+               connectAttr -f ($refGamma + ".outValue") ("ref_ss_" + $filename + ".outColor");
+	       
+	       // check for linear mode
+	       $linTest = `checkBox -q -v checkLin`;
+	       if ($linTest!=1) 
+	       {
+	     		setAttr ($refGamma + ".gammaX") $REFgamma;
+	       		setAttr ($refGamma + ".gammaY") $REFgamma;
+	       		setAttr ($refGamma + ".gammaZ") $REFgamma;
+	       }
+               
+               setAttr -type "double3" ($refNode + ".colorGain") $REFmult $REFmult $REFmult;
+               
+               select -cl;
+               
+               // check for puppet
+	       $puppetTest = `checkBox -q -v checkPuppet`;
+	       if ($puppetTest!=0)
+	       {
+	       		setAttr ($refShadingGroup  + ".miExportMrMaterial") 1;
+	            	string $refPRT = `shadingNode -asShader p_ray_type -name ("REF_prt_" + $filename)`;
+	                connectAttr -f ($refPRT + ".outValue") ($refShadingGroup + ".miMaterialShader");
+	                connectAttr -f ($refGamma + ".outValue") ($refPRT + ".eye");
+	                connectAttr -f ($refNode + ".outAlpha") ($refPRT + ".eyeA");
+	                setAttr ($refPRT + ".enable_finalgather") 1;
+	                string $refMc = `createNode mib_continue -name ("REF_mc_"+ $filename)`;
+	                connectAttr -f ($refMc + ".outValue") ($refPRT + ".finalgather");
+               }
+   	    }
+   	    }
+   	       
+   	    
+   	    //"""""""""""""""""""""""""
+   	    // check if sun is enabled
+   	    //"""""""""""""""""""""""""   	    
+   	    $sunTest = `checkBox -q -v checkKeylight`;
+   	    if ($sunTest!=0)
+   	    {
+   	        // search for sunColor
+   	        while($nextWord!="SUNcolor"&&!`feof $fileId`)
+   	            {
+   	                $nextWord = `fgetword $fileId`;
+   	            }
+   	        fgetword $fileId;
+   	        string $sunColorString = `fgetword $fileId`;
+   	        string $sunColorRGB[];
+   	        tokenize $sunColorString "," $sunColorRGB;
+
+            // search for sunIntensity
+            while($nextWord!="SUNmulti"&&!`feof $fileId`)
+                {
+                    $nextWord = `fgetword $fileId`;
+                }
+             fgetword $fileId;
+             string $sunIntensity= `fgetword $fileId`;
+   	        
+   	        // search for sunU
+   	        while($nextWord!="SUNu"&&!`feof $fileId`)
+   	            {
+   	            $nextWord = `fgetword $fileId`;
+   	            }
+   	        fgetword $fileId;
+   	        $sunU = `fgetword $fileId`;
+   	        
+   	        // search for sunV
+   	        while($nextWord!="SUNv"&&!`feof $fileId`)
+   	            {
+   	            $nextWord = `fgetword $fileId`;
+   	            }
+   	        fgetword $fileId;
+   	        $sunV = `fgetword $fileId`;
+            
+            //Intensitaet des Lichts runter schrauben
+            //TODO: Find out why this is necessary
+            float $lightInt = float($sunIntensity)/200;
+            
+            string $lightName = `shadingNode -asLight spotLight`;
+            $lightName = `rename $lightName ("SUN_" + $filename)`;
+            setAttr ($lightName + ".intensity") $lightInt;
+            setAttr ($lightName + ".colorR") (float($sunColorRGB[0]));
+            setAttr ($lightName + ".colorG") (float($sunColorRGB[1]));
+            setAttr ($lightName + ".colorB") (float($sunColorRGB[2]));
+            setAttr ($lightName + ".coneAngle") 90;
+            
+            int $test = `checkBox -q -v checkShadows`;
+            
+            if ($test==1) setAttr ($lightName + ".useRayTraceShadows") 1;
+            
+            // translate
+            move -r -os -wd 0 0 48 ;
+            
+
+            string $adjustGroup = `group -w -n ($lightName + "_adjustGroup")`;
+            xform -os -piv 0 0 0;
+            rotate -r -os -90 0 0;
+            
+            if ($heightDef)
+   	    	{
+   	    		move -r 0 $heightVal 0;
+   	    	}
+            
+            pickWalk -d down;
+            
+            string $rotateV = `group -n ($lightName + "_rotateV")`;
+            xform -os -piv 0 0 0;
+            string $rotateU = `group -n ($lightName + "_rotateU")`;
+            xform -os -piv 0 0 0;
+                        
+            float $rotV = (float) $sunV * 180.0;
+            
+            float $rotU = (float) $sunU * 360.0;
+            
+            setAttr ($rotateV + ".rotateX") $rotV;
+            setAttr ($rotateU + ".rotateZ") (-$rotU);
+            
+            select -cl;
+            
+            
+   	        
+   	    }
+   	    
+   	    //""""""""""""""""""""""""""""""""""""""""
+   	    // check if additional lights are enabled
+   	    //""""""""""""""""""""""""""""""""""""""""
+   	    $alTest = `checkBox -q -v checkAddLights`;
+   	    if ($alTest!=0)
+   	    {
+   	    	// count LIGHTS
+   	    	int $lightCount = 0;
+   	    	while (!`feof $fileId`)
+   	    	{
+   	    		$nextWord = `fgetword $fileId`;
+   	    		int $test = startsWith($nextWord, "[Light");
+   	    		if ($test) $lightCount = $lightCount + 1;
+   	    	}
+   	    	frewind $fileId;
+   	    	for ($kl=0; $kl<$lightCount; $kl++)
+   	    	{
+				// search for lightName
+				while($nextWord!="LIGHTname" &&!`feof $fileId`)
+					{
+						$nextWord = `fgetword $fileId`;
+					}
+				$nextWord = `fgetword $fileId`;
+				
+				
+				string $tokens[];
+				tokenize "nextWord" "\"" $tokens;
+				string $lightNameString  = $tokens[1];
+				if (size($tokens)<3)
+				{
+					// get more words
+					int $interrupt = 0;
+					while (!$interrupt)
+					{
+						 $nextWord = `fgetword $fileId`;
+						 if (endsWith($nextWord, "\""))
+						 {
+							string $tokensII[];
+							tokenize $nextWord "\"" $tokensII;
+							$lightNameString = $lightNameString + $tokensII[0];
+							$interrupt=1;
+						 }
+						 else
+						 $lightNameString = $lightNameString + $nextWord;
+					}
+				}
+				while($nextWord!="LIGHTcolor" &&!`feof $fileId`)
+					{
+						$nextWord = `fgetword $fileId`;
+					}
+				fgetword $fileId;
+				string $lightColorString = `fgetword $fileId`;
+				string $lightColorRGB[];
+				tokenize $lightColorString "," $lightColorRGB;
+	
+				// search for lightIntensity
+				while($nextWord!="LIGHTmulti"&&!`feof $fileId`)
+					{
+						$nextWord = `fgetword $fileId`;
+					}
+				 fgetword $fileId;
+				 string $lightIntensity= `fgetword $fileId`;
+				
+				// search for lightU
+				while($nextWord!="LIGHTu"&&!`feof $fileId`)
+					{
+					$nextWord = `fgetword $fileId`;
+					}
+				fgetword $fileId;
+				$sunU = `fgetword $fileId`;
+				
+				// search for lightV
+				while($nextWord!="LIGHTv"&&!`feof $fileId`)
+					{
+					$nextWord = `fgetword $fileId`;
+					}
+				fgetword $fileId;
+				$sunV = `fgetword $fileId`;
+				
+				//Intensitaet des Lichts runter schrauben
+				//TODO: Find out why this is necessary
+				float $lightInt = float($lightIntensity)/200;
+				
+				$lightName = `shadingNode -asLight spotLight`;
+				$lightName = `rename $lightName ("LIGHT_" + $lightNameString)`;
+				setAttr ($lightName + ".intensity") $lightInt;
+				setAttr ($lightName + ".colorR") (float($lightColorRGB[0]));
+				setAttr ($lightName + ".colorG") (float($lightColorRGB[1]));
+				setAttr ($lightName + ".colorB") (float($lightColorRGB[2]));
+				setAttr ($lightName + ".coneAngle") 90;
+				
+				int $test = `checkBox -q -v checkShadows`;
+				
+				if ($test==1) setAttr ($lightName + ".useRayTraceShadows") 1;
+				
+				// translate
+				move -r -os -wd 0 0 48 ;
+				
+	
+				string $adjustGroup = `group -w -n ($lightName + "_adjustGroup")`;
+				xform -os -piv 0 0 0;
+				rotate -r -os -90 0 0;
+				
+				if ($heightDef)
+				{
+					move -r 0 $heightVal 0;
+				}
+				
+				pickWalk -d down;
+				
+				string $rotateV = `group -n ($lightName + "_rotateV")`;
+				xform -os -piv 0 0 0;
+				string $rotateU = `group -n ($lightName + "_rotateU")`;
+				xform -os -piv 0 0 0;
+							
+				float $rotV = (float) $sunV * 180.0;
+				
+				float $rotU = (float) $sunU * 360.0;
+				
+				setAttr ($rotateV + ".rotateX") $rotV;
+				setAttr ($rotateU + ".rotateZ") (-$rotU);
+				
+				select -cl;
+            }
+            
+   	        
+   	    }
+   	    
+   	    //"""""""""""""""""""""""""
+	    // check if linear workflow is selected
+   	    //""""""""""""""""""""""""" 
+   	    $linTest = `checkBox -q -v checkLin`;
+   	    if ($linTest!=0)
+   	    {
+   	    	// create mental ray lens shader
+   	    	string $lin_lenseShader = `createNode "mia_exposure_simple"`;
+   	    	$lin_lenseShader = `rename ($lin_lenseShader) ("sIBL_" + $filename + "_mia_exosure_simple")`;
+   
+   	    	// connect lense shader to all cameras
+   	    	string $cameraList[] = `ls -fl -type "camera"`;
+   	    	for ($cam in $cameraList)
+   	    	{
+   	    		connectAttr -f ($lin_lenseShader + ".message") ($cam + ".miLensShader");
+   	    	}
+   	    	
+   	    	
+   	    	
+   	    }
+   	    
+   	    
+   	    fclose($fileId);
+   	} 
+   	select -cl;
+}
+
+global proc enterPath(string $mySDR,string $message)
+{
+	print("Please define an Environmentvariable sIBL pointing to your collection...");
+       	string $window = `window -title "Set collection path..."
+    	-iconName "Short Name"
+    	-widthHeight 200 100`;
+       	columnLayout -adjustableColumn true;
+     	text -label $message;
+      	textFieldGrp
+	-label "sIBL collection path:"
+ 	-text $mySDR
+    	-editable true
+   	-cc "$mySDR = `textFieldGrp -q -text Test2`"    
+    	Test2;
+        button -label "OK" 
+        -command ("string $mySDR = `textFieldGrp -q -text Test2`;deleteUI -window " + $window + ";" + "sIBL2($mySDR)");
+       	setParent ..;
+      	showWindow $window;
+}
+
+// Interface
+
+global proc sIBL()
+{
+     // make sure mentalrayOptions exist
+        if(! `objExists miDefaultOptions`)
+            {
+            	string $mro = `createNode mentalrayOptions  -n miDefaultOptions`;
+            	dgdirty $mro;
+        	}
+        if(! `objExists mentalrayGlobals`)
+        	{
+        		createNode mentalrayGlobals -n mentalrayGlobals;
+        	}
+    select -r mentalrayGlobals;
+    // Directory with the default sIBL-Library
+    // 01 string $mySDR="C:/sIBL/Library/";
+    string $myTDR="//10.10.35.93/data/_lightingScriptDomain/tEXTURE_Collection/";    									// id01_nish
+    string $myLDR="//10.10.35.93/data/_lightingScriptDomain/lIGHT_Collection/";    
+    string $mySDR="//10.10.35.93/data/_lightingScriptDomain/sIBL_Collection/";
+    string $retVal = `system("if exist //FW-ISILON/data/_lightingScriptDomain/sIBL_Collection/ echo 1")`;				// id01_nish
+    string $retValLDR = `system("if exist //FW-ISILON/data/_lightingScriptDomain/lIGHT_Collection/ echo 1")`;			// id01_nish
+    if ((strip($retVal) == 1) && (strip($retValLDR) == 1))
+    {
+	    int $defined = 0;
+	    // check for option Var
+	    int $ovTest = `optionVar -exists "sIBL"`;
+	    if ($ovTest==1) 
+	    	{
+	    		$mySDR = `optionVar -q "sIBL"`;
+	    		$defined = 1;
+	    	}
+	    string $envTest=`getenv "sIBL"`;
+	    if ($envTest!="")
+	        {
+	            $mySDR = $envTest;
+	            $defined = 1;
+	        }
+	    if ($defined == 1)
+	    {
+		    print (" $defined  $mySDR "+$mySDR+"\n");
+			sIBL2($mySDR) ;
+
+		}
+	    	else
+	    	enterPath($mySDR,"There is no environment variable sIBL defined! Please enter your Collection Path!");
+	    // this is necessary for Maya 2008 and below
+	    string $sourceCMRT = "source createMentalRayGlobalsTab.mel";
+	    if (`exists createMentalRayGlobalsTab.mel`) catchQuiet (eval ($sourceCMRT));
+	    // this is necessary for Maya 2009
+	    string $sourceCMRILT = "source createMentalRayIndirectLightingTab.mel";
+	    if (`exists createMentalRayIndirectLightingTab.mel`) catchQuiet (eval ($sourceCMRILT));
+	}
+	else
+	{
+		print "no connection to isilon detected - enter login password in windows explorer first time";																// 01
+	}
+
+}
+
+
+// starting sdr2 with an argument
+
+global proc sIBL2(string $mySDR)
+{   
+	// change no 01 - user:nishith , foldername for image preset
+	// 	id01_nish
+
+	string $folderName = "//FW-ISILON/data/_lightingScriptDomain/hdrThumbnails/";
+	string $fileCount[] = `getFileList -fld $folderName -filespec "*.jpg"`;
+	// 	id01_nish
+
+	// create optionVar with the directory name
+	optionVar -sv "sIBL" $mySDR;
+	// check if user forgot the last "/" and add it if he did
+	int $letterCount = size($mySDR);
+	if ((!endsWith($mySDR,"/"))&&(!endsWith($mySDR,"\\"))) $mySDR = $mySDR + "/";
+
+	// Load the SDR-List
+
+	// print ("mySDR:" + $mySDR + "!");
+
+	string $Temp_List[] = `getFileList -folder $mySDR`; 
+
+	// check if files are folders
+	int $Temp_count = size($Temp_List);
+	int $SDR_count = 0;
+	string $SDR_List[];
+	global string $LDR_List[];  // id01_nish
+	global string $TDR_List[];  // id01_nish
+	for ($i=0; $i<$Temp_count; $i++)
+    {
+        // check if there are any ibl-files in the folder
+        string $IBL_List[] = `getFileList -fs ("*.ibl") -fld ($mySDR + "/" + $Temp_List[$i] + "/")`;
+        $iblFile = $IBL_List[0];
+        for ($iblTest in $IBL_List)	
+        {
+        	int $iblCheck = `strcmp $iblTest ($Temp_List[$i] + "*.ibl")`;
+        	if ($iblCheck==0) $iblFile = $iblTest;
+        }
+        // print ($iblTest + "\n");
+        catchQuiet ($testFileId = `fopen ($mySDR + "/" + $Temp_List[$i] + "/" + $iblTest) "r"`);
+        // print ($testFileId + "\n");
+        if ($testFileId!=0) 
+        {
+            $SDR_List[$SDR_count] = $Temp_List[$i];
+            $SDR_count++;
+        }
+        fclose $testFileId;  
+    }
+
+    // empty help string
+    print "";
+    // check if SDR_List is empty
+    int $slCount = size ($SDR_List);
+
+//  ******************************************************
+// 	id01_nish add check for LDR_List here
+//  ******************************************************
+
+	string $myLDR = dirname($mySDR) + "/" + "lIGHT_Collection" + "/";					// id01_nish
+	string $LDRTemp_List[] = `getFileList -folder $myLDR`; 
+
+	// check if files are folders
+	int $LDRTemp_count = size($LDRTemp_List);
+	int $LDR_count = 0;
+	string $LDR_List[];
+	for ($i=0; $i<$LDRTemp_count; $i++)
+	{
+		// check if there are any ibl-files in the folder
+		string $LDRIBL_List[] = `getFileList -fs ("*.ibl") -fld ($myLDR + "/" + $LDRTemp_List[$i] + "/")`;
+		$iblFile = $LDRIBL_List[0];
+		for ($iblTest in $LDRIBL_List)	
+		{
+        	int $iblCheck = `strcmp $iblTest ($LDRTemp_List[$i] + "*.ibl")`;
+        	if ($iblCheck==0) $iblFile = $iblTest;
+        }
+        // print ($iblTest + "\n");
+        catchQuiet ($LDRtestFileId = `fopen ($myLDR + "/" + $LDRTemp_List[$i] + "/" + $iblTest) "r"`);
+        // print ($LDRtestFileId + "\n");
+        if ($LDRtestFileId!=0) 
+        {
+            $LDR_List[$LDR_count] = $LDRTemp_List[$i];
+            $LDR_count++;
+        }
+        fclose $LDRtestFileId;
+    }
+	print ("LDR_List[0] " + $LDR_List[0]);
+
+    // empty help string
+    print "";
+    // check if LDR_List is empty
+    int $LDRslCount = size ($LDR_List);
+
+//  ***********************************
+//  ******************************************************
+// 	id01_nish add check for TDR_List ( texture ) here     
+
+//  ******************************************************
+
+	string $myTDR = dirname($mySDR) + "/" + "tEXTURE_Collection" + "/";
+	string $TDRTemp_List[] = `getFileList -folder $myTDR`; 
+
+	// check if files are folders
+	int $TDRTemp_count = size($TDRTemp_List);
+	int $TDR_count = 0;
+	string $TDR_List[];
+	for ($i=0; $i<$TDRTemp_count; $i++)
+	{
+		// check if there are any ibl-files in the folder
+		string $TDRIBL_List[] = `getFileList -fs ("*.ibl") -fld ($myTDR + "/" + $TDRTemp_List[$i] + "/")`;
+		$iblFile = $TDRIBL_List[0];
+		for ($iblTest in $TDRIBL_List)	
+		{
+        	int $iblCheck = `strcmp $iblTest ($TDRTemp_List[$i] + "*.ibl")`;
+        	if ($iblCheck==0) $iblFile = $iblTest;
+        }
+        // print ($iblTest + "\n");
+        catchQuiet ($TDRtestFileId = `fopen ($myTDR + "/" + $TDRTemp_List[$i] + "/" + $iblTest) "r"`);
+        // print ($LDRtestFileId + "\n");
+        if ($TDRtestFileId!=0) 
+        {
+            $TDR_List[$TDR_count] = $TDRTemp_List[$i];
+            $TDR_count++;
+        }
+        fclose $TDRtestFileId;
+    }
+	print ("TDR_List[0] " + $TDR_List[0]);
+
+    // empty help string
+    print "";
+    // check if LDR_List is empty
+    int $TDRslCount = size ($TDR_List);
+
+//  ***********************************
+
+
+    if  ($slCount==0)
+    {
+    	enterPath($mySDR,"This Folder does not contain any sIBL-sets. Please enter a new folder...");
+    }
+    else
+    {
+    	// Evironment-Variable aktualisieren
+    	putenv "sIBL" $mySDR;
+
+    	// add light-collection env // id01_nish
+
+    	// Create Window
+		if ((`window -ex sIBL_Window`) == 1) 
+        {
+            deleteUI -window sIBL_Window;
+            // print ("Deleted old Window!\n");
+        }
+		window -title "sIBL Loader v0.18a" -menuBar true -s true -widthHeight 460 500 sIBL_Window;
+		string $tabs = `tabLayout -innerMarginWidth 5 -innerMarginHeight 5`;    			// id01_nish
+		// print ("Creating new window!");
+		setUITemplate -pst attributeEditorTemplate;
+    	//string $form = `formLayout -numberOfDivisions 100`;
+
+    	string $cL = `columnLayout `;
+    	    rowColumnLayout -numberOfColumns 2 -columnWidth 1 300 -columnWidth 2 128;
+    	    textFieldGrp
+ 				    -label "SIBL-Collection path:"
+ 				    -text  $mySDR
+    			    -editable false
+    			    -cc "$mySDR = `textFieldGrp -q -text Test`;sIBL2($mySDR);"    
+    			     Test;
+    	    button -label "Change path ..." -c "textFieldGrp -e -editable true Test";
+    	// Schleife, um die Entries zu erzeugen
+		int $length = size($SDR_List);
+		
+		string $command = "textScrollList -numberOfRows " + 8 + " -allowMultiSelection false";
+		int $i=0;
+		for ($i=0; $i<$length; $i++)
+		{
+    	// original: $command = $command + " -append " + $SDR_List[$i];		// ## gxe 4/2010
+			$command = $command + " -append \"" + $SDR_List[$i]+"\"";
+		}
+		// $command = $command + " -selectItem \"" + $SDR_List[0]+"\"";
+		$command = $command + " -selectItem \"" + $SDR_List[0]+"\"";	// ## gxe 4/2010
+		$command = $command + " -sc \"string $selName[] = `textScrollList -q -si tsl`;loadSDR($selName[0]);\" tsl";
+		eval ($command);
+		// print($mySDR);
+		image -image ($mySDR + "sIBLmaya.jpg") -h 124 refPic;
+		// Spalte fuer die Optionen
+		setParent..;
+		rowColumnLayout -numberOfColumns 2 -columnWidth 1 300 -columnWidth 2 168;
+		columnLayout;
+    	checkBox -label "create background" -en 1 checkBack;
+    	checkBox -label "create environment map" -en 1 checkEnv;
+    	checkBox -label "create reflection map" -en 1 checkRef;
+    	checkBox -label "create sun light" -en 1 checkKeylight;
+    	checkBox -label "create additional lights" -en 1 checkAddLights;
+   	
+    	// zum uebergeordneten Layout wechseln
+		setParent..;
+		// Spalte fuer die Detailinformationen
+		columnLayout;
+		text -label "Name:" nameText;
+		text -label "Location:" locationText;
+    	text -label "Author:" authorText;
+	
+    	// zum uebergeordneten Layout wechseln
+		setParent..;
+		setParent..;
+		text -label "Comment:" commentText;
+		rowColumnLayout -numberOfColumns 2 -columnWidth 1 300 -columnWidth 2 128;
+    	button -label "Load selected" -c "string $selName[] = `textScrollList -q -si tsl`;load2SDR($selName[0]);";
+		//formLayout -e -attachForm $cL "top" 5 -attachForm $cL "bottom" 30 $form;
+		
+		//load default selection
+		loadSDR($SDR_List[0]);
+		
+		text -label "" dummyText;
+		// checkBox: will ich das bestehende Setup loeschen?
+		checkBox -label "delete previous sIBL-setup" -en 1 checkDel;
+		
+		// checkBox: set Render Globals
+		checkBox -label "set render globals" -en 1 checkRen;
+		
+		// checkBox: create geometry sphere for environment map
+		checkBox -label "use sphere instead of ibl-node" -en 0 checkGeo;
+		
+		// add command for environment sphere
+		checkBox -e -cc "int $cE = `checkBox -q -v checkEnv`; checkBox -e -en $cE checkGeo;" checkEnv;
+		
+		// add command for keylight
+		checkBox -e -cc "int $cE = `checkBox -q -v checkKeylight`; checkBox -e -en $cE checkShadows;" checkKeylight;
+		
+		// add command for additional lights
+		checkBox -e -cc "int $aL = `checkBox -q -v checkAddLights`;" checkAddLights;
+		
+        // checkBox: cast shadows
+		checkBox -label "cast shadows" -en 0 checkShadows;
+		
+        // checkBox: use rayswitch (requires Maya 2008 or above)
+		checkBox -label "use rayswitch (requires Maya 2008 or above)" -en 1 checkRaySwitch;
+		
+		checkBox -label "linear workflow" -en 1 checkLin;
+		
+		// checkBox: show Textures in Viewport
+		checkBox -label "show textures at resolution -> " -en 1 checkTex;
+    	
+        		textScrollList -numberOfRows 1 -allowMultiSelection false
+		    -ann "set resolution to" -append "512"      -append "1024"      -append "2048"
+		    -append "4096"
+		    -selectItem "512"
+    		    -showIndexedItem 1 resTSL;
+    
+    		checkBox -label "pass on final gather (requires puppet shaders)" -en 1 checkPuppet;
+    		
+    		// add command for rayswitch
+		checkBox -e -cc "int $cRS = `checkBox -q -v checkRaySwitch`; int $cE= `checkBox -q -v checkEnv`; if ($cRS==0) checkBox -e -en 1 checkPuppet; if ($cRS==0 && $cE==1) checkBox -e -en 1 checkGeo; if ($cRS==1) { checkBox -e -en 0 checkGeo; checkBox -e -en 0 checkPuppet; }" checkRaySwitch;
+		
+    	setParent..;	
+	    // print ("\nFinished, now what?");
+		// print ($SDR_List[0]);
+		// select first sIBL in column
+		textScrollList -e -si $SDR_List[0] tsl;
+		setParent ..;
+		
+	     /*id01_nish string $child2 = `rowColumnLayout -numberOfColumns 2`;
+		    gridLayout -numberOfColumns 5 -cellWidthHeight 120 120;
+	    	for ($i=0;$i<size($fileCount);$i++)
+	    	{
+	        	symbolButton -dtg "test" -ebg 1 -backgroundColor 0.0 0.1 0.5 -image ($folderName + $fileCount[$i]) -command "print \"work in progress\"" ;
+        	}
+	        setParent ..;
+			setParent ..;id01_nish */
+			
+    	string $child2 = `columnLayout `;
+    	    rowColumnLayout -numberOfColumns 2 -columnWidth 1 300 -columnWidth 2 128;
+    	    textFieldGrp
+ 				    -label "tEXTURE path:"
+ 				    -text  $myTDR
+    			    -editable false
+    	//		    -cc "$myTDR = `textFieldGrp -q -text tdrTest`;sIBL3($myTDR);"
+    			    -cc "$myTDR = `textFieldGrp -q -text tdrTest`;"
+    			     tdrTest;
+    	    button -label "Change path ..." -c "textFieldGrp -e -editable true tdrTest";
+    	// Schleife, um die Entries zu erzeugen
+		int $length = size($TDR_List);
+
+		string $commandTDR = "textScrollList -numberOfRows " + 8 + " -allowMultiSelection false";
+		int $i=0;
+		for ($i=0; $i<$length; $i++)
+		{
+    	// original: $commandTDR = $commandTDR + " -append " + $TDR_List[$i];		// ## gxe 4/2010
+    		print (" ..... $TDR_List[$i] ........."+$TDR_List[$i]+"\n");
+			$commandTDR = $commandTDR + " -append \"" + $TDR_List[$i]+"\"";
+		}
+		// $commandTDR = $commandTDR + " -selectItem \"" + $TDR_List[0]+"\"";
+		$commandTDR = $commandTDR + " -selectItem \"" + $TDR_List[0]+"\"";	// ## gxe 4/2010
+		$commandTDR = $commandTDR + " -sc \"string $selName[] = `textScrollList -q -si TDRtsl`;loadTDR($selName[0]);\" TDRtsl";
+
+		eval ($commandTDR);
+
+		image -image ($myTDR + "sIBLmaya.jpg") -h 124 refPicTDR;
+		// Spalte fuer die Optionen
+		setParent..;
+		rowColumnLayout -numberOfColumns 2 -columnWidth 1 300 -columnWidth 2 168;
+		columnLayout;
+    	checkBox -label "create background" -en 0 checkBackTDR;
+    	checkBox -label "create environment map" -en 0 checkEnvTDR;
+    	checkBox -label "create reflection map" -en 0 checkRefTDR;
+    	checkBox -label "create sun light" -en 0 checkKeylightTDR;
+    	checkBox -label "create additional lights" -en 0 checkAddLightsTDR;
+
+    	// zum uebergeordneten Layout wechseln
+		setParent..;
+		// Spalte fuer die Detailinformationen
+		columnLayout;
+		text -label "Name:" nameTextTDR;
+		text -label "Location:" locationTextTDR;
+    	text -label "Author:" authorTextTDR;
+
+    	// zum uebergeordneten Layout wechseln
+		setParent..;
+		setParent..;
+		text -label "Comment:" commentTextTDR;
+		rowColumnLayout -numberOfColumns 2 -columnWidth 1 300 -columnWidth 2 128;
+    	button -label "Load selected" -c "string $selName[] = `textScrollList -q -si TDRtsl`;load2TDR($selName[0]);";
+		//formLayout -e -attachForm $cL "top" 5 -attachForm $cL "bottom" 30 $form;
+
+		//load default selection
+		loadTDR($TDR_List[0]);
+
+		text -label "" dummyTextTDR;
+		// checkBox: will ich das bestehende Setup loeschen?
+		checkBox -label "delete previous sIBL-setup" -en 1 checkDelTDR;
+
+		// checkBox: set Render Globals
+		//checkBox -label "set render globals" -en 1 checkRen;
+
+		// checkBox: create geometry sphere for environment map
+		//checkBox -label "use sphere instead of ibl-node" -en 0 checkGeo;
+
+		// add command for environment sphere
+		//checkBox -e -cc "int $cE = `checkBox -q -v checkEnv`; checkBox -e -en $cE checkGeo;" checkEnv;
+
+		// add command for keylight
+		//checkBox -e -cc "int $cE = `checkBox -q -v checkKeylight`; checkBox -e -en $cE checkShadows;" checkKeylight;
+
+		// add command for additional lights
+		//checkBox -e -cc "int $aL = `checkBox -q -v checkAddLights`;" checkAddLights;
+
+        // checkBox: cast shadows
+		//checkBox -label "cast shadows" -en 0 checkShadows;
+
+        // checkBox: use rayswitch (requires Maya 2008 or above)
+		//checkBox -label "use rayswitch (requires Maya 2008 or above)" -en 1 checkRaySwitch;
+
+		//checkBox -label "linear workflow" -en 1 checkLin;
+		
+		// checkBox: show Textures in Viewport
+		//checkBox -label "show textures at resolution -> " -en 1 checkTex;
+    	
+        //		textScrollList -numberOfRows 1 -allowMultiSelection false
+		//    -ann "set resolution to" -append "512"      -append "1024"      -append "2048"
+		//    -append "4096"
+		//    -selectItem "512"
+    	//    -showIndexedItem 1 resTSL;
+    
+    	//	checkBox -label "pass on final gather (requires puppet shaders)" -en 1 checkPuppet;
+    		
+    		// add command for rayswitch
+		//checkBox -e -cc "int $cRS = `checkBox -q -v checkRaySwitch`; int $cE= `checkBox -q -v checkEnv`; if ($cRS==0) checkBox -e -en 1 checkPuppet; if ($cRS==0 && $cE==1) checkBox -e -en 1 checkGeo; if ($cRS==1) { checkBox -e -en 0 checkGeo; checkBox -e -en 0 checkPuppet; }" checkRaySwitch;
+		
+    	setParent..;	
+	    // print ("\nFinished, now what?");
+		// print ($SDR_List[0]);
+		// select first sIBL in column
+		textScrollList -e -si $TDR_List[0] TDRtsl;
+		setParent ..;
+				         
+		
+    	string $child3 = `columnLayout `;
+    	    rowColumnLayout -numberOfColumns 2 -columnWidth 1 300 -columnWidth 2 128;
+    	    textFieldGrp
+ 				    -label "LIGHT-Collection path:"
+ 				    -text  $myLDR
+    			    -editable false
+    	//		    -cc "$myLDR = `textFieldGrp -q -text ldrTest`;sIBL3($myLDR);"
+    			    -cc "$myLDR = `textFieldGrp -q -text ldrTest`;"
+    			     ldrTest;
+    	    button -label "Change path ..." -c "textFieldGrp -e -editable true ldrTest";
+    	// Schleife, um die Entries zu erzeugen
+		int $length = size($LDR_List);
+
+		string $commandLDR = "textScrollList -numberOfRows " + 8 + " -allowMultiSelection false";
+		int $i=0;
+		for ($i=0; $i<$length; $i++)
+		{
+    	// original: $commandLDR = $commandLDR + " -append " + $LDR_List[$i];		// ## gxe 4/2010
+    		print (" ..... $LDR_List[$i] ........."+$LDR_List[$i]+"\n");
+			$commandLDR = $commandLDR + " -append \"" + $LDR_List[$i]+"\"";
+		}
+		// $commandLDR = $commandLDR + " -selectItem \"" + $LDR_List[0]+"\"";
+		$commandLDR = $commandLDR + " -selectItem \"" + $LDR_List[0]+"\"";	// ## gxe 4/2010
+		$commandLDR = $commandLDR + " -sc \"string $selName[] = `textScrollList -q -si LDRtsl`;loadLDR($selName[0]);\" LDRtsl";
+
+		eval ($commandLDR);
+
+		image -image ($myLDR + "sIBLmaya.jpg") -h 124 refPicLDR;
+		// Spalte fuer die Optionen
+		setParent..;
+		rowColumnLayout -numberOfColumns 2 -columnWidth 1 300 -columnWidth 2 168;
+		columnLayout;
+    	checkBox -label "create background" -en 0 checkBackLDR;
+    	checkBox -label "create environment map" -en 0 checkEnvLDR;
+    	checkBox -label "create reflection map" -en 0 checkRefLDR;
+    	checkBox -label "create sun light" -en 0 checkKeylightLDR;
+    	checkBox -label "create additional lights" -en 0 checkAddLightsLDR;
+
+    	// zum uebergeordneten Layout wechseln
+		setParent..;
+		// Spalte fuer die Detailinformationen
+		columnLayout;
+
+
+    	// zum uebergeordneten Layout wechseln
+		setParent..;
+		setParent..;
+		text -label "Comment:" commentTextLDR;
+		rowColumnLayout -numberOfColumns 2 -columnWidth 1 300 -columnWidth 2 128;
+    	button -label "Load selected" -c "string $selName[] = `textScrollList -q -si LDRtsl`;load2LDR($selName[0]);";
+		//formLayout -e -attachForm $cL "top" 5 -attachForm $cL "bottom" 30 $form;
+
+		//load default selection
+		loadLDR($LDR_List[0]);
+
+		text -label "" dummyTextLDR;
+		// checkBox: will ich das bestehende Setup loeschen?
+		checkBox -label "delete previous sIBL-setup" -en 1 checkDelLDR;
+
+		// checkBox: set Render Globals
+		//checkBox -label "set render globals" -en 1 checkRen;
+
+		// checkBox: create geometry sphere for environment map
+		//checkBox -label "use sphere instead of ibl-node" -en 0 checkGeo;
+
+		// add command for environment sphere
+		//checkBox -e -cc "int $cE = `checkBox -q -v checkEnv`; checkBox -e -en $cE checkGeo;" checkEnv;
+
+		// add command for keylight
+		//checkBox -e -cc "int $cE = `checkBox -q -v checkKeylight`; checkBox -e -en $cE checkShadows;" checkKeylight;
+
+		// add command for additional lights
+		//checkBox -e -cc "int $aL = `checkBox -q -v checkAddLights`;" checkAddLights;
+
+        // checkBox: cast shadows
+		//checkBox -label "cast shadows" -en 0 checkShadows;
+
+        // checkBox: use rayswitch (requires Maya 2008 or above)
+		//checkBox -label "use rayswitch (requires Maya 2008 or above)" -en 1 checkRaySwitch;
+
+		//checkBox -label "linear workflow" -en 1 checkLin;
+		
+		// checkBox: show Textures in Viewport
+		//checkBox -label "show textures at resolution -> " -en 1 checkTex;
+    	
+        //		textScrollList -numberOfRows 1 -allowMultiSelection false
+		//    -ann "set resolution to" -append "512"      -append "1024"      -append "2048"
+		//    -append "4096"
+		//    -selectItem "512"
+    	//    -showIndexedItem 1 resTSL;
+    
+    	//	checkBox -label "pass on final gather (requires puppet shaders)" -en 1 checkPuppet;
+    		
+    		// add command for rayswitch
+		//checkBox -e -cc "int $cRS = `checkBox -q -v checkRaySwitch`; int $cE= `checkBox -q -v checkEnv`; if ($cRS==0) checkBox -e -en 1 checkPuppet; if ($cRS==0 && $cE==1) checkBox -e -en 1 checkGeo; if ($cRS==1) { checkBox -e -en 0 checkGeo; checkBox -e -en 0 checkPuppet; }" checkRaySwitch;
+		
+    	setParent..;	
+	    // print ("\nFinished, now what?");
+		// print ($SDR_List[0]);
+		// select first sIBL in column
+		textScrollList -e -si $LDR_List[0] LDRtsl;
+		setParent ..;
+
+		tabLayout -edit -tabLabel $cL "sIBL" -tabLabel $child2 "textures" -tabLabel $child3 "light preset" $tabs;					// id01_nish
+
+		showWindow sIBL_Window;
+		// print ("Showing Window...");
+	}
+}
